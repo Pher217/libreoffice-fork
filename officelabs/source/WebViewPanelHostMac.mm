@@ -29,7 +29,15 @@
 #ifdef HAVE_FEATURE_CEF
 #ifdef MACOSX
 
+// premac.h/postmac.h rename the Carbon-era global Point/Size/TimeValue/
+// TimeRecord identifiers (pulled in transitively by Cocoa.h via MacTypes.h)
+// out of the way for the scope of the Cocoa import only, so LO's own
+// tools::Point/Size classes (via officelabs/WebViewPanel.hxx below, which
+// drags in vcl/weld -> tools/gen.hxx) don't collide with the SDK's plain
+// C Point/Size structs. This is the same pattern vcl/osx/*.mm uses.
+#include <premac.h>
 #import <Cocoa/Cocoa.h>
+#include <postmac.h>
 
 #include <officelabs/INativeCefHost.hxx>
 #include <officelabs/WebViewPanel.hxx>
