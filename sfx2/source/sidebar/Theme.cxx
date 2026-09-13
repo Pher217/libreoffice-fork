@@ -160,13 +160,8 @@ void Theme::UpdateTheme()
     {
         const StyleSettings& rStyle (Application::GetSettings().GetStyleSettings());
 
-        // OfficeLabs: use branded colors when OFFICELABS_THEME env var is set
-        // Cached in a static to avoid thread-unsafe repeated getenv() calls.
-        static const std::string s_olThemeSidebar = [] {
-            const char* p = getenv("OFFICELABS_THEME");
-            return p ? std::string(p) : std::string();
-        }();
-        const bool bOfficeLabs = !s_olThemeSidebar.empty();
+        // OfficeLabs: branded colours whenever a theme is configured (env, user profile or install share)
+        const bool bOfficeLabs = IsOLThemeConfigured();
 
         Color aBaseBackgroundColor, aSecondColor, aHighlight;
 
