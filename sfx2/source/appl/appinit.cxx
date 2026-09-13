@@ -201,6 +201,13 @@ void SfxApplication::Initialize_Impl()
             SvtMiscOptions aMiscOpts;
             aMiscOpts.SetIconTheme(bDark ? u"colibre_dark_svg"_ustr : u"colibre"_ustr);
 
+            // Before the palette below: SetAppColorMode re-merges the system
+            // colours, which would otherwise overwrite it.
+            const AppearanceMode eAppearance
+                = sfx2::sidebar::GetOLAppearanceMode(sfx2::sidebar::GetOLTheme());
+            if (MiscSettings::GetAppColorMode() != eAppearance)
+                MiscSettings::SetAppColorMode(eAppearance);
+
             const Color aBg      = olc.bg;
             const Color aSurface = olc.surface;
             const Color aBorder  = olc.border;

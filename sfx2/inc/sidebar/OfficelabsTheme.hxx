@@ -7,6 +7,7 @@
 #include <rtl/byteseq.hxx>
 #include <rtl/ustring.hxx>
 #include <tools/color.hxx>
+#include <vcl/themecolors.hxx>
 #include <cstdlib>
 #include <string>
 
@@ -74,6 +75,21 @@ inline OLTheme GetOLTheme()
     if (theme == "dark")
         return OLTheme::Dark;
     return OLTheme::MidnightBlue;
+}
+
+/// Native controls (on macOS the title bar, combo box fields and scrollers)
+/// follow the application appearance, not the palette. On AUTO they follow the
+/// system, so a dark system painted dark controls inside the light theme (#163).
+/// Dark themes stay on AUTO outside macOS: Windows was verified that way.
+inline AppearanceMode GetOLAppearanceMode(OLTheme eTheme)
+{
+    if (eTheme == OLTheme::Light)
+        return AppearanceMode::LIGHT;
+#ifdef MACOSX
+    return AppearanceMode::DARK;
+#else
+    return AppearanceMode::AUTO;
+#endif
 }
 
 struct OLColors
