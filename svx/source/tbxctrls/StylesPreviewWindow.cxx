@@ -34,6 +34,7 @@
 #include <vcl/glyphitemcache.hxx>
 #include <vcl/virdev.hxx>
 #include <vcl/settings.hxx>
+#include <vcl/wall.hxx>
 #include <vcl/weld/Builder.hxx>
 #include <vcl/weld/Menu.hxx>
 
@@ -578,6 +579,14 @@ Bitmap StylesPreviewWindow_Base::GetCachedPreview(const StylePreviewDescriptor& 
         ScopedVclPtrInstance<VirtualDevice> pImg;
         const Size aSize(100, 30);
         pImg->SetOutputSizePixel(aSize);
+
+        // The VirtualDevice defaults to white, which made previews unreadable in dark UI themes.
+        const StyleSettings& rStyleSettings = Application::GetSettings().GetStyleSettings();
+        const Color aFaceColor = rStyleSettings.GetFaceColor();
+        pImg->SetBackground(Wallpaper(aFaceColor));
+        pImg->Erase();
+        pImg->SetFillColor(aFaceColor);
+        pImg->SetTextColor(aFaceColor.IsDark() ? COL_WHITE : COL_BLACK);
 
         StyleItemController aStyleController(rStyle);
         aStyleController.Paint(*pImg);
