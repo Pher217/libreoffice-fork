@@ -39,18 +39,20 @@ struct OLThemeSource
     bool configured;
 };
 
-// Resolved once: env OFFICELABS_THEME, then the per-user profile file the agent writes
-// (<UserInstallation>/user/officelabs/theme.txt), then the install share file.
+// Resolved once: the per-user profile file the agent writes
+// (<UserInstallation>/user/officelabs/theme.txt) wins, then env OFFICELABS_THEME, then the
+// install share file. The file ranks above the env var because an office restart inherits
+// the launcher's environment: with env first, a theme switched in Settings would never apply.
 inline const OLThemeSource& GetOLThemeSource()
 {
     static const OLThemeSource s = [] {
-        if (const char* p = std::getenv("OFFICELABS_THEME"); p && *p)
-            return OLThemeSource{ p, true };
         std::string aUser = ReadOLThemeFileURL(
             u"${$BRAND_BASE_DIR/" LIBO_ETC_FOLDER "/" SAL_CONFIGFILE("bootstrap")
              ":UserInstallation}/user/officelabs/theme.txt"_ustr);
         if (!aUser.empty())
             return OLThemeSource{ aUser, true };
+        if (const char* p = std::getenv("OFFICELABS_THEME"); p && *p)
+            return OLThemeSource{ p, true };
         std::string aShare
             = ReadOLThemeFileURL(u"$BRAND_BASE_DIR/" LIBO_SHARE_FOLDER "/officelabs_theme.txt"_ustr);
         if (!aShare.empty())
