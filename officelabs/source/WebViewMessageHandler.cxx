@@ -26,6 +26,11 @@
 #include <vcl/svapp.hxx>
 #include <tools/link.hxx>
 
+#include <com/sun/star/task/OfficeRestartManager.hpp>
+#include <com/sun/star/task/XInteractionHandler.hpp>
+#include <com/sun/star/uno/Exception.hpp>
+#include <comphelper/processfactory.hxx>
+
 #include <functional>
 
 namespace {
@@ -205,6 +210,13 @@ bool WebViewMessageHandler::OnQuery(
         || req.find("\"type\": \"requestConsent\"") != std::string::npos)
     {
         handleRequestConsent(req, callback);
+        return true;
+    }
+
+    if (req.find("\"type\":\"requestOfficeRestart\"") != std::string::npos
+        || req.find("\"type\": \"requestOfficeRestart\"") != std::string::npos)
+    {
+        handleRequestOfficeRestart(callback);
         return true;
     }
 
@@ -475,6 +487,29 @@ void WebViewMessageHandler::handleGetDocumentUrl(CefRefPtr<Callback> callback)
         std::string escaped = escapeJson(url);
         std::string response = "{\"url\":\"" + escaped + "\"}";
         cb->Success(response);
+    });
+}
+
+// A theme change only takes effect after a restart, so the sidebar asks the
+// office to restart itself; the agent never kills the process. requestRestart
+// is a process-wide operation, not a panel one -- unlike the document handlers
+// it deliberately ignores m_pPanel and works while the panel is gone.
+void WebViewMessageHandler::handleRequestOfficeRestart(CefRefPtr<Callback> callback)
+{
+    CefRefPtr<Callback> cb = callback;
+
+    postToVclThread([cb]() {
+        try
+        {
+            css::task::OfficeRestartManager::get(comphelper::getProcessComponentContext())
+                ->requestRestart(css::uno::Reference<css::task::XInteractionHandler>());
+            cb->Success("{\"success\":true}");
+        }
+        catch (const css::uno::Exception&)
+        {
+            SAL_WARN("officelabs.cef", "requestOfficeRestart: restart request failed");
+            cb->Failure(500, "restart request failed");
+        }
     });
 }
 
