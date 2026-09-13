@@ -533,11 +533,18 @@ void ImplDrawButton( OutputDevice *const pDev, tools::Rectangle aFillRect,
         }
 
         pDev->SetLineColor();
+        // A flat, unpressed button has no face: leave its background visible
+        // instead of filling with whatever colour the device happens to hold.
         if ( nStyle & (DrawButtonFlags::Checked | DrawButtonFlags::DontKnow) )
+        {
             pDev->SetFillColor( rStyleSettings.GetCheckedColor() );
+            pDev->DrawRect( aFillRect );
+        }
         else if (!bNoFace)
+        {
             pDev->SetFillColor( rStyleSettings.GetFaceColor() );
-        pDev->DrawRect( aFillRect );
+            pDev->DrawRect( aFillRect );
+        }
     }
 }
 
