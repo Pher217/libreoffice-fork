@@ -460,6 +460,13 @@ void WebViewPanel::cleanupPersistentBrowser()
 
     for (auto& [handle, state] : s_perFrameState)
     {
+        // The client (held by the browser until its close completes) still
+        // routes renderer messages to the router while CefShutdown() pumps;
+        // unregister the handler before destroying it, or the next cefQuery
+        // dispatches into freed memory (crash on restart, #160).
+        if (state.messageRouter && state.messageHandler)
+            state.messageRouter->RemoveHandler(state.messageHandler.get());
+
         if (state.browser)
         {
             state.browser->GetHost()->CloseBrowser(true);
