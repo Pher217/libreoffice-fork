@@ -12,6 +12,8 @@
  * resolution order. */
 #pragma once
 
+#include <sal/config.h>
+
 #include <config_folders.h>
 #include <osl/file.hxx>
 #include <rtl/bootstrap.hxx>

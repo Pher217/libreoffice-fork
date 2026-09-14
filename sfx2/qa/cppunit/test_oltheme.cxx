@@ -117,6 +117,13 @@ public:
         CPPUNIT_ASSERT(!ResolveOLTheme("", nullptr, "").configured);
     }
 
+    // GIVEN only the install share file WHEN resolved THEN configured is true, so
+    // the Windows app mode is still applied from it.
+    void testShareOnlyIsConfigured()
+    {
+        CPPUNIT_ASSERT(ResolveOLTheme("", nullptr, "midnight-blue").configured);
+    }
+
     CPPUNIT_TEST_SUITE(OLThemeResolveTest);
     CPPUNIT_TEST(testUserFileWinsOverEnvAndShare);
     CPPUNIT_TEST(testEnvWinsOverShareWhenUserFileEmpty);
@@ -124,6 +131,7 @@ public:
     CPPUNIT_TEST(testEmptyEnvStringIsIgnored);
     CPPUNIT_TEST(testNothingConfiguredDefaultsToMidnightBlue);
     CPPUNIT_TEST(testNothingConfiguredIsNotConfigured);
+    CPPUNIT_TEST(testShareOnlyIsConfigured);
     CPPUNIT_TEST_SUITE_END();
 };
 
