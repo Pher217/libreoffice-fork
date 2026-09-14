@@ -14,16 +14,24 @@
 #include <com/sun/star/frame/XModel.hpp>
 #include <com/sun/star/text/XText.hpp>
 #include <com/sun/star/text/XTextDocument.hpp>
+#include <com/sun/star/text/XTextViewCursor.hpp>
+#include <com/sun/star/text/XTextViewCursorSupplier.hpp>
+#include <com/sun/star/text/XParagraphCursor.hpp>
+#include <com/sun/star/frame/XStorable.hpp>
+#include <com/sun/star/document/XUndoManager.hpp>
+#include <com/sun/star/document/XUndoManagerSupplier.hpp>
 #include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
+#include <officelabs/InlineCompletionEligibility.hxx>
 #include <com/sun/star/sheet/XSpreadsheet.hpp>
 #include <com/sun/star/table/XCell.hpp>
 #include <com/sun/star/drawing/XDrawPagesSupplier.hpp>
 #include <com/sun/star/drawing/XDrawPage.hpp>
+#include <officelabs/officelabsdllapi.h>
 #include <rtl/ustring.hxx>
 
 namespace officelabs {
 
-class DocumentController
+class OFFICELABS_DLLPUBLIC DocumentController
 {
 private:
     css::uno::Reference<css::text::XTextDocument> m_xDocument;
@@ -49,6 +57,9 @@ public:
     OUString getDocumentUrl();
     OUString getDocumentText();
     OUString getSelectedText();
+
+    CursorContext getCursorContext();
+    bool insertAtCursor(const OUString& rText);
 };
 
 } // namespace officelabs

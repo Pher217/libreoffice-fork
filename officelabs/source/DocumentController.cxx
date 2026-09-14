@@ -24,6 +24,8 @@
 #include <rtl/ustrbuf.hxx>
 #include <sal/log.hxx>
 
+#include <comphelper/scopeguard.hxx>
+
 using namespace css;
 
 namespace officelabs {
@@ -363,6 +365,115 @@ OUString DocumentController::getSelectedText()
     }
 
     return OUString();
+}
+
+CursorContext DocumentController::getCursorContext()
+{
+    CursorContext aContext;
+    aContext.readOnly = true;
+
+    try
+    {
+        if (!m_xController.is())
+            return aContext;
+
+        uno::Reference<text::XTextViewCursorSupplier> xViewCursorSupplier(m_xController,
+                                                                          uno::UNO_QUERY);
+        if (!xViewCursorSupplier.is())
+            return aContext;
+
+        uno::Reference<text::XTextViewCursor> xViewCursor = xViewCursorSupplier->getViewCursor();
+        if (!xViewCursor.is())
+            return aContext;
+
+        uno::Reference<text::XTextCursor> xTextCursor(xViewCursor, uno::UNO_QUERY);
+        if (!xTextCursor.is())
+            return aContext;
+
+        aContext.hasSelection = !xTextCursor->isCollapsed();
+
+        uno::Reference<text::XText> xText = xViewCursor->getText();
+        if (!xText.is())
+            return aContext;
+
+        uno::Reference<text::XTextCursor> xBefore
+            = xText->createTextCursorByRange(xViewCursor->getStart());
+        uno::Reference<text::XParagraphCursor> xParaBefore(xBefore, uno::UNO_QUERY);
+        if (!xParaBefore.is())
+            return aContext;
+        xParaBefore->gotoStartOfParagraph(true);
+        aContext.textBefore = xParaBefore->getString();
+
+        uno::Reference<text::XTextCursor> xAfter
+            = xText->createTextCursorByRange(xViewCursor->getStart());
+        uno::Reference<text::XParagraphCursor> xParaAfter(xAfter, uno::UNO_QUERY);
+        if (!xParaAfter.is())
+            return aContext;
+        xParaAfter->gotoEndOfParagraph(true);
+        aContext.textAfter = xParaAfter->getString();
+
+        aContext.readOnly = false;
+        if (m_xModel.is())
+        {
+            uno::Reference<frame::XStorable> xStorable(m_xModel, uno::UNO_QUERY);
+            if (xStorable.is() && xStorable->isReadonly())
+                aContext.readOnly = true;
+        }
+    }
+    catch (const uno::Exception&)
+    {
+        SAL_WARN("officelabs", "DocumentController::getCursorContext failed");
+        aContext.readOnly = true;
+    }
+
+    return aContext;
+}
+
+bool DocumentController::insertAtCursor(const OUString& rText)
+{
+    if (rText.isEmpty())
+        return false;
+
+    if (!m_xController.is() || !m_xModel.is())
+        return false;
+
+    try
+    {
+        uno::Reference<text::XTextViewCursorSupplier> xViewCursorSupplier(m_xController,
+                                                                          uno::UNO_QUERY);
+        if (!xViewCursorSupplier.is())
+            return false;
+
+        uno::Reference<text::XTextViewCursor> xViewCursor = xViewCursorSupplier->getViewCursor();
+        if (!xViewCursor.is())
+            return false;
+
+        uno::Reference<document::XUndoManagerSupplier> xUndoSupplier(m_xModel, uno::UNO_QUERY);
+        if (!xUndoSupplier.is())
+            return false;
+
+        uno::Reference<document::XUndoManager> xUndoManager = xUndoSupplier->getUndoManager();
+        if (!xUndoManager.is())
+            return false;
+
+        bool bEntered = false;
+        comphelper::ScopeGuard aGuard([&xUndoManager, &bEntered]() {
+            if (bEntered)
+                xUndoManager->leaveUndoContext();
+        });
+
+        xUndoManager->enterUndoContext(u"Accept suggestion"_ustr);
+        bEntered = true;
+
+        xViewCursor->getText()->insertString(xViewCursor, rText, false);
+
+        return true;
+    }
+    catch (const uno::Exception&)
+    {
+        SAL_WARN("officelabs", "DocumentController::insertAtCursor failed");
+        return false;
+    }
 }
 
 } // namespace officelabs

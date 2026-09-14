@@ -8,7 +8,8 @@ $(eval $(call gb_Module_add_targets,officelabs,\
 ))
 
 $(eval $(call gb_Module_add_check_targets,officelabs,\
-    CppunitTest_officelabs_inline \
+	CppunitTest_officelabs_inline \
+	CppunitTest_officelabs_cursor \
 ))
 
 # CEF WebView support (conditional on --with-cef)
