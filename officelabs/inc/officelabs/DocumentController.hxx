@@ -50,6 +50,7 @@ public:
     void setCalcDocument(const css::uno::Reference<css::sheet::XSpreadsheetDocument>& xDoc);
     void setImpressDocument(const css::uno::Reference<css::drawing::XDrawPagesSupplier>& xDoc);
     void setModel(const css::uno::Reference<css::frame::XModel>& xModel);
+    void setController(const css::uno::Reference<css::frame::XController>& xController);
     void setAppType(const OUString& sAppType) { m_sAppType = sAppType; }
     bool hasDocument() const { return m_xDocument.is() || m_xCalcDoc.is() || m_xImpressDoc.is() || !m_sAppType.isEmpty(); }
 

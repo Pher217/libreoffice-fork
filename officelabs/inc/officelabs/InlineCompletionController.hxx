@@ -57,13 +57,17 @@ public:
     /// Performs the agent request. Injectable so tests need no agent.
     using Fetcher = std::function<FetchResult(const OString& rJsonBody)>;
 
+    /// Injectable caret rectangle provider for testing geometry changes.
+    using CaretProvider = std::function<std::optional<tools::Rectangle>()>;
+
     static Fetcher agentFetcher();
 
     InlineCompletionController(
         const css::uno::Reference<css::frame::XController>& xController,
         const css::uno::Reference<css::frame::XModel>& xModel,
         vcl::Window* pEditWin,
-        Fetcher aFetcher = agentFetcher());
+        Fetcher aFetcher = agentFetcher(),
+        CaretProvider aCaretProvider = {});
 
     void start();
     void dispose();
@@ -82,9 +86,9 @@ public:
     void requestNow();
 
     // Test accessors.
-    bool isGhostVisible() const { return m_bSuggestionPending || (m_pGhost && m_pGhost->isShowing()); }
+    bool isGhostVisible() const { return m_pGhost && m_pGhost->isShowing(); }
     const OUString& ghostText() const { return m_sSuggestion; }
-    OUString pendingSuggestion() const { return m_bSuggestionPending ? m_sSuggestion : OUString(); }
+    OUString pendingSuggestion() const { return m_pGhost && m_pGhost->isShowing() ? m_sSuggestion : OUString(); }
     bool isInFlight() const { return m_bInFlight; }
 
 private:
@@ -93,9 +97,11 @@ private:
     bool isFromEditWindow(const css::uno::Reference<css::uno::XInterface>& xSource) const;
     void onResult(sal_uInt64 nGeneration, const FetchResult& rResult);
     void hideGhost();
+    bool isComposing() const;
 
     DECL_LINK(WindowEventHdl, VclWindowEvent&, void);
     DECL_LINK(TimerHdl, Timer*, void);
+    DECL_LINK(TrackTimerHdl, Timer*, void);
 
     css::uno::Reference<css::frame::XController> m_xController;
     css::uno::Reference<css::frame::XModel> m_xModel;
@@ -106,11 +112,12 @@ private:
     VclPtr<GhostTextWindow> m_pGhost;
 
     Fetcher m_aFetcher;
+    CaretProvider m_aCaretProvider;
     Timer m_aTimer;
+    Timer m_aTrackTimer;
 
     std::atomic<sal_uInt64> m_nGeneration;
     std::atomic<bool> m_bInFlight;
-    bool m_bComposing;
     bool m_bDisposed;
 
     int m_nFailures;
@@ -119,7 +126,7 @@ private:
     CursorContext m_aRequested;
 
     OUString m_sSuggestion;
-    bool m_bSuggestionPending;
+    std::optional<tools::Rectangle> m_aShownRect;
 
     struct Shared
     {

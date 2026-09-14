@@ -838,6 +838,25 @@ void WebViewPanel::syncCefWindowSize()
 
 IMPL_LINK_NOARG(WebViewPanel, ResizeTimerHdl, Timer*, void)
 {
+    SfxViewShell* pViewShell = nullptr;
+    if (m_pBindings)
+    {
+        if (SfxDispatcher* pDispatcher = m_pBindings->GetDispatcher())
+        {
+            if (SfxViewFrame* pViewFrame = pDispatcher->GetFrame())
+                pViewShell = pViewFrame->GetViewShell();
+        }
+    }
+    if (!pViewShell)
+        pViewShell = SfxViewShell::Current();
+
+    if (pViewShell && pViewShell->GetWindow())
+    {
+        css::uno::Reference<css::frame::XController> xController = pViewShell->GetController();
+        if (!m_xInlineCompletion || m_xInlineCompletion->controller() != xController)
+            detectDocument();
+    }
+
     syncCefWindowSize();
     m_aResizeTimer.Start();  // Restart for next check
 }
@@ -955,7 +974,7 @@ void WebViewPanel::detectDocument()
         {
             SfxViewShell* pViewShell = pViewFrame->GetViewShell();
             css::uno::Reference<css::frame::XController> xController(
-                pShell->GetModel()->getCurrentController());
+                pViewShell ? pViewShell->GetController() : css::uno::Reference<css::frame::XController>());
             if (xController.is() && pViewShell && pViewShell->GetWindow())
             {
                 if (!m_xInlineCompletion || m_xInlineCompletion->controller() != xController)

@@ -21,10 +21,13 @@
 #include <com/sun/star/document/XUndoManager.hpp>
 #include <com/sun/star/document/XUndoManagerSupplier.hpp>
 #include <com/sun/star/frame/XModel.hpp>
+#include <com/sun/star/lang/XMultiServiceFactory.hpp>
 #include <com/sun/star/text/ControlCharacter.hpp>
 #include <com/sun/star/text/XText.hpp>
+#include <com/sun/star/text/XTextContent.hpp>
 #include <com/sun/star/text/XTextCursor.hpp>
 #include <com/sun/star/text/XTextDocument.hpp>
+#include <com/sun/star/text/XTextRange.hpp>
 #include <com/sun/star/text/XTextViewCursor.hpp>
 #include <com/sun/star/text/XTextViewCursorSupplier.hpp>
 
@@ -318,6 +321,46 @@ public:
         CPPUNIT_ASSERT_EQUAL(u"The quick brown fox"_ustr, xText->getString());
     }
 
+    // GIVEN a Writer document with a protected text section
+    // WHEN the view cursor is inside that section
+    // THEN getCursorContext().readOnly is true and insertAtCursor returns
+    // false without changing the document text.
+    void testInsertAtCursor_protectedSectionIsReadOnly()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDocument(mxComponent, UNO_QUERY_THROW);
+        Reference<text::XText> xText = xTextDocument->getText();
+        xText->setString(u"Before section after."_ustr);
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        Reference<lang::XMultiServiceFactory> xFactory(xModel, UNO_QUERY_THROW);
+        Reference<uno::XInterface> xSection = xFactory->createInstance(
+            u"com.sun.star.text.TextSection"_ustr);
+        Reference<beans::XPropertySet> xSectionProps(xSection, UNO_QUERY_THROW);
+        xSectionProps->setPropertyValue(u"IsProtected"_ustr, Any(true));
+        Reference<text::XTextContent> xSectionContent(xSection, UNO_QUERY_THROW);
+        xText->insertTextContent(xText->getEnd(), xSectionContent, false);
+
+        Reference<text::XTextViewCursorSupplier> xViewCursorSupplier(
+            xModel->getCurrentController(), UNO_QUERY_THROW);
+        Reference<text::XTextViewCursor> xViewCursor = xViewCursorSupplier->getViewCursor();
+        Reference<text::XTextRange> xAnchor = xSectionContent->getAnchor();
+        xViewCursor->gotoRange(xAnchor, false);
+
+        officelabs::DocumentController aController;
+        aController.setModel(xModel);
+        aController.setController(xModel->getCurrentController());
+        aController.setDocument(xTextDocument);
+
+        // Inserting the section adds its own paragraph, so compare against the
+        // text as it stands right before the refused insert.
+        const OUString sBeforeInsert = xText->getString();
+        const CursorContext aContext = aController.getCursorContext();
+        CPPUNIT_ASSERT(aContext.readOnly);
+        CPPUNIT_ASSERT(!aController.insertAtCursor(u" inserted"_ustr));
+        CPPUNIT_ASSERT_EQUAL(sBeforeInsert, xText->getString());
+    }
+
     CPPUNIT_TEST_SUITE(DocumentControllerCursorTest);
     CPPUNIT_TEST(testCursorContext_endOfParagraph);
     CPPUNIT_TEST(testCursorContext_afterFourChars);
@@ -329,6 +372,7 @@ public:
     CPPUNIT_TEST(testInsertAtCursor_cursorAfterInsert);
     CPPUNIT_TEST(testInsertAtCursor_recordsRedline);
     CPPUNIT_TEST(testInsertAtCursor_emptyStringReturnsFalse);
+    CPPUNIT_TEST(testInsertAtCursor_protectedSectionIsReadOnly);
     CPPUNIT_TEST_SUITE_END();
 };
 

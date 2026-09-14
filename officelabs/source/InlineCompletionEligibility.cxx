@@ -5,8 +5,10 @@
 #include <boost/property_tree/json_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
 
+#include <rtl/character.hxx>
 #include <rtl/strbuf.hxx>
 
+#include <cstdio>
 #include <sstream>
 
 namespace officelabs {
@@ -34,7 +36,12 @@ OString jsonEscape(const OString& rValue)
             case '\t': aOut.append("\\t"); break;
             default:
                 if (static_cast<unsigned char>(c) < 0x20)
-                    aOut.append("\\u00").append(OString::number(c, 16));
+                {
+                    char aHex[5];
+                    std::snprintf(aHex, sizeof(aHex), "%04x",
+                                  static_cast<unsigned int>(static_cast<unsigned char>(c)));
+                    aOut.append("\\u").append(aHex);
+                }
                 else
                     aOut.append(c);
         }
@@ -78,9 +85,15 @@ OUString sanitizeSuggestion(const OUString& rSuggestion)
 
 OString buildCompletionRequest(const CursorContext& rContext)
 {
-    const OUString sBefore = rContext.textBefore.getLength() > MAX_TEXT_BEFORE_CHARS
+    OUString sBefore = rContext.textBefore.getLength() > MAX_TEXT_BEFORE_CHARS
         ? rContext.textBefore.copy(rContext.textBefore.getLength() - MAX_TEXT_BEFORE_CHARS)
         : rContext.textBefore;
+
+    if (!sBefore.isEmpty()
+        && rtl::isLowSurrogate(static_cast<sal_Unicode>(sBefore[0])))
+    {
+        sBefore = sBefore.copy(1);
+    }
 
     OStringBuffer aBuf;
     aBuf.append("{\"text_before\":\"").append(jsonEscape(sBefore.toUtf8()));

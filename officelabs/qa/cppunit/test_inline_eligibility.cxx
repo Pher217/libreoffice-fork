@@ -177,6 +177,37 @@ public:
             std::string_view(sExpected.data(), sExpected.size())));
     }
 
+    // GIVEN a control character without a JSON short escape WHEN the completion
+    // request body is built THEN it is emitted as backslash-u followed by four
+    // hex digits (char code 1 -> \u0001).
+    void testBuildCompletionRequest_escapesControlCharacters()
+    {
+        const CursorContext aContext{ OUStringChar(sal_Unicode(1)), OUString(), false, false };
+        const OString aBody = buildCompletionRequest(aContext);
+        CPPUNIT_ASSERT(aBody.indexOf("\\u0001") != -1);
+    }
+
+    // GIVEN text_before whose 2000-unit cut falls on a low surrogate WHEN the
+    // request body is built THEN that stray surrogate is dropped and the body
+    // starts with the following full characters.
+    void testBuildCompletionRequest_dropsStrayLowSurrogate()
+    {
+        OUStringBuffer aBefore;
+        aBefore.append('a');
+        // U+1F600 expressed as its UTF-16 surrogate pair.
+        aBefore.append(u'\xD83D');
+        aBefore.append(u'\xDE00');
+        for (int i = 0; i < 1999; ++i)
+            aBefore.append('b');
+        const OUString sBefore = aBefore.makeStringAndClear();
+        CPPUNIT_ASSERT_EQUAL(sal_Int32(2002), sBefore.getLength());
+
+        const CursorContext aContext{ sBefore, OUString(), false, false };
+        const std::string sExpected = "{\"text_before\":\"" + std::string(1999, 'b') + "\",";
+        const OString aBody = buildCompletionRequest(aContext);
+        CPPUNIT_ASSERT(aBody.startsWith(std::string_view(sExpected.data(), sExpected.size())));
+    }
+
     // GIVEN a well-formed response with one suggestion WHEN the first
     // suggestion is parsed THEN its text is returned.
     void testParseFirstSuggestion_returnsText()
@@ -216,6 +247,8 @@ public:
     CPPUNIT_TEST(testSanitizeSuggestion_keepsLeadingSpace);
     CPPUNIT_TEST(testBuildCompletionRequest_escapesSpecialCharacters);
     CPPUNIT_TEST(testBuildCompletionRequest_capsTextBefore);
+    CPPUNIT_TEST(testBuildCompletionRequest_escapesControlCharacters);
+    CPPUNIT_TEST(testBuildCompletionRequest_dropsStrayLowSurrogate);
     CPPUNIT_TEST(testParseFirstSuggestion_returnsText);
     CPPUNIT_TEST(testParseFirstSuggestion_emptySuggestions);
     CPPUNIT_TEST(testParseFirstSuggestion_invalidJson);

@@ -5,8 +5,11 @@
 
 #include <officelabs/DocumentController.hxx>
 
+#include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/container/XIndexAccess.hpp>
+#include <com/sun/star/frame/XController.hpp>
 #include <com/sun/star/frame/XModel.hpp>
+#include <com/sun/star/frame/XStorable.hpp>
 #include <com/sun/star/text/XTextRange.hpp>
 #include <com/sun/star/view/XSelectionSupplier.hpp>
 #include <com/sun/star/sheet/XSpreadsheets.hpp>
@@ -89,6 +92,11 @@ void DocumentController::setModel(const uno::Reference<frame::XModel>& xModel)
     m_xModel = xModel;
     if (xModel.is())
         m_xController = xModel->getCurrentController();
+}
+
+void DocumentController::setController(const uno::Reference<frame::XController>& xController)
+{
+    m_xController = xController;
 }
 
 OUString DocumentController::getApplicationType()
@@ -419,6 +427,56 @@ CursorContext DocumentController::getCursorContext()
             if (xStorable.is() && xStorable->isReadonly())
                 aContext.readOnly = true;
         }
+
+        // Writer selections inside protected sections or protected table
+        // cells are not caught by the document-level read-only flag.
+        uno::Reference<beans::XPropertySet> xCursorProps(xViewCursor, uno::UNO_QUERY);
+        if (xCursorProps.is())
+        {
+            try
+            {
+                uno::Any aSection = xCursorProps->getPropertyValue(u"TextSection"_ustr);
+                uno::Reference<beans::XPropertySet> xSection;
+                if ((aSection >>= xSection) && xSection.is())
+                {
+                    try
+                    {
+                        bool bProtected = false;
+                        if ((xSection->getPropertyValue(u"IsProtected"_ustr) >>= bProtected)
+                            && bProtected)
+                            aContext.readOnly = true;
+                    }
+                    catch (const uno::Exception&)
+                    {
+                    }
+                }
+            }
+            catch (const uno::Exception&)
+            {
+            }
+
+            try
+            {
+                uno::Any aCell = xCursorProps->getPropertyValue(u"Cell"_ustr);
+                uno::Reference<beans::XPropertySet> xCell;
+                if ((aCell >>= xCell) && xCell.is())
+                {
+                    try
+                    {
+                        bool bProtected = false;
+                        if ((xCell->getPropertyValue(u"IsProtected"_ustr) >>= bProtected)
+                            && bProtected)
+                            aContext.readOnly = true;
+                    }
+                    catch (const uno::Exception&)
+                    {
+                    }
+                }
+            }
+            catch (const uno::Exception&)
+            {
+            }
+        }
     }
     catch (const uno::Exception&)
     {
@@ -432,6 +490,9 @@ CursorContext DocumentController::getCursorContext()
 bool DocumentController::insertAtCursor(const OUString& rText)
 {
     if (rText.isEmpty())
+        return false;
+
+    if (getCursorContext().readOnly)
         return false;
 
     if (!m_xController.is() || !m_xModel.is())

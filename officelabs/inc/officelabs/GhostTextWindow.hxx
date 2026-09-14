@@ -29,7 +29,7 @@ public:
 
     /// Show the ghost text immediately to the right of the caret rectangle.
     /// If there is no room, the window is hidden instead.
-    void showAt(const tools::Rectangle& rCaretPixel, const OUString& rText);
+    bool showAt(const tools::Rectangle& rCaretPixel, const OUString& rText);
 
     /// Hide the window and clear the stored text.
     void hide();

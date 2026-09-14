@@ -25,6 +25,7 @@
 #include <tools/time.hxx>
 #include <tools/link.hxx>
 #include <vcl/commandevent.hxx>
+#include <vcl/officelabs/extinput.hxx>
 #include <vcl/svapp.hxx>
 
 #include <boost/property_tree/json_parser.hpp>
@@ -63,27 +64,35 @@ InlineCompletionController::InlineCompletionController(
     const css::uno::Reference<css::frame::XController>& xController,
     const css::uno::Reference<css::frame::XModel>& xModel,
     vcl::Window* pEditWin,
-    Fetcher aFetcher)
+    Fetcher aFetcher,
+    CaretProvider aCaretProvider)
     : m_xController(xController)
     , m_xModel(xModel)
     , m_pEditWin(pEditWin)
     , m_aFetcher(std::move(aFetcher))
+    , m_aCaretProvider(std::move(aCaretProvider))
     , m_aTimer("officelabs InlineCompletion")
+    , m_aTrackTimer("officelabs InlineCompletion track")
     , m_nGeneration(0)
     , m_bInFlight(false)
-    , m_bComposing(false)
     , m_bDisposed(false)
     , m_nFailures(0)
     , m_nBackoffUntilMs(0)
-    , m_bSuggestionPending(false)
 {
     m_aDoc.setModel(xModel);
+    m_aDoc.setController(xController);
     css::uno::Reference<css::text::XTextDocument> xTextDoc(xModel, css::uno::UNO_QUERY);
     if (xTextDoc.is())
         m_aDoc.setDocument(xTextDoc);
 
+    if (!m_aCaretProvider)
+        m_aCaretProvider = [this]() { return GhostTextWindow::caretRectPixel(m_pEditWin.get()); };
+
     m_aTimer.SetTimeout(400); // ms
     m_aTimer.SetInvokeHandler(LINK(this, InlineCompletionController, TimerHdl));
+
+    m_aTrackTimer.SetTimeout(100); // ms
+    m_aTrackTimer.SetInvokeHandler(LINK(this, InlineCompletionController, TrackTimerHdl));
 
     m_pShared = std::make_shared<Shared>();
     m_pShared->pOwner = this;
@@ -129,6 +138,7 @@ void InlineCompletionController::dispose()
         m_pShared->pOwner = nullptr;
 
     m_aTimer.Stop();
+    m_aTrackTimer.Stop();
 
     try
     {
@@ -170,10 +180,17 @@ sal_Bool SAL_CALL InlineCompletionController::keyPressed(const css::awt::KeyEven
     if (m_bDisposed || !isFromEditWindow(e.Source))
         return false;
 
+    if (isComposing())
+    {
+        hideGhost();
+        ++m_nGeneration;
+        return false;
+    }
+
     const sal_Int16 nCode = e.KeyCode;
     const sal_Int16 nMods = e.Modifiers;
 
-    if (m_bSuggestionPending || (m_pGhost && m_pGhost->isShowing()))
+    if (m_pGhost && m_pGhost->isShowing())
     {
         if (nCode == css::awt::Key::TAB && nMods == 0)
         {
@@ -198,7 +215,7 @@ sal_Bool SAL_CALL InlineCompletionController::keyPressed(const css::awt::KeyEven
 
 sal_Bool SAL_CALL InlineCompletionController::keyReleased(const css::awt::KeyEvent& e)
 {
-    if (m_bDisposed || !isFromEditWindow(e.Source) || m_bComposing)
+    if (m_bDisposed || !isFromEditWindow(e.Source) || isComposing())
         return false;
 
     m_aTimer.Start();
@@ -212,7 +229,7 @@ void SAL_CALL InlineCompletionController::disposing(const css::lang::EventObject
 
 void InlineCompletionController::requestNow()
 {
-    if (m_bDisposed || m_bInFlight || m_bComposing)
+    if (m_bDisposed || m_bInFlight || isComposing())
         return;
 
     const sal_uInt64 nNow = tools::Time::GetSystemTicks();
@@ -267,17 +284,25 @@ void InlineCompletionController::onResult(sal_uInt64 nGeneration, const FetchRes
     if (sSuggestion.isEmpty())
         return;
 
-    m_sSuggestion = sSuggestion;
-    m_bSuggestionPending = true;
-
-    auto aRect = GhostTextWindow::caretRectPixel(m_pEditWin);
+    auto aRect = m_aCaretProvider();
     if (!aRect)
+    {
+        hideGhost();
         return;
+    }
 
     if (!m_pGhost)
         m_pGhost = VclPtr<GhostTextWindow>::Create(m_pEditWin.get());
 
-    m_pGhost->showAt(*aRect, m_sSuggestion);
+    if (!m_pGhost->showAt(*aRect, sSuggestion))
+    {
+        hideGhost();
+        return;
+    }
+
+    m_sSuggestion = sSuggestion;
+    m_aShownRect = aRect;
+    m_aTrackTimer.Start();
 }
 
 void InlineCompletionController::hideGhost()
@@ -285,8 +310,14 @@ void InlineCompletionController::hideGhost()
     if (m_pGhost)
         m_pGhost->hide();
 
-    m_bSuggestionPending = false;
+    m_aTrackTimer.Stop();
+    m_aShownRect.reset();
     m_sSuggestion.clear();
+}
+
+bool InlineCompletionController::isComposing() const
+{
+    return OfficeLabsIsExtTextInputActive(m_pEditWin.get());
 }
 
 IMPL_LINK(InlineCompletionController, WindowEventHdl, VclWindowEvent&, rEvent, void)
@@ -295,26 +326,14 @@ IMPL_LINK(InlineCompletionController, WindowEventHdl, VclWindowEvent&, rEvent, v
 
     switch (nId)
     {
-        case VclEventId::ExtTextInput:
-            m_bComposing = true;
-            hideGhost();
-            ++m_nGeneration;
-            break;
-
-        case VclEventId::EndExtTextInput:
-            m_bComposing = false;
-            break;
-
         case VclEventId::WindowCommand:
         {
-            // IME hosts query CursorPos and friends on every keystroke; only
-            // commands that move or cover the view dismiss the suggestion.
+            // Dismiss on context menu only. Wheel/scroll is handled by the
+            // geometry tracking timer; IME composition is read from WindowImpl.
             const auto* pCommand = static_cast<const CommandEvent*>(rEvent.GetData());
             if (!pCommand)
                 break;
-            const CommandEventId eId = pCommand->GetCommand();
-            if (eId != CommandEventId::Wheel && eId != CommandEventId::StartAutoScroll
-                && eId != CommandEventId::AutoScroll && eId != CommandEventId::ContextMenu)
+            if (pCommand->GetCommand() != CommandEventId::ContextMenu)
                 break;
             hideGhost();
             ++m_nGeneration;
@@ -340,6 +359,23 @@ IMPL_LINK(InlineCompletionController, WindowEventHdl, VclWindowEvent&, rEvent, v
 IMPL_LINK_NOARG(InlineCompletionController, TimerHdl, Timer*, void)
 {
     requestNow();
+}
+
+IMPL_LINK_NOARG(InlineCompletionController, TrackTimerHdl, Timer*, void)
+{
+    if (m_pGhost && m_pGhost->isShowing())
+    {
+        auto aRect = m_aCaretProvider();
+        if (!aRect || aRect != m_aShownRect)
+        {
+            hideGhost();
+            ++m_nGeneration;
+        }
+        else
+        {
+            m_aTrackTimer.Start();
+        }
+    }
 }
 
 } // namespace officelabs

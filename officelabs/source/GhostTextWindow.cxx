@@ -24,7 +24,7 @@ GhostTextWindow::GhostTextWindow(vcl::Window* pEditWin)
     SetBackground(Wallpaper(svtools::ColorConfig().GetColorValue(svtools::DOCCOLOR).nColor));
 }
 
-void GhostTextWindow::showAt(const tools::Rectangle& rCaretPixel, const OUString& rText)
+bool GhostTextWindow::showAt(const tools::Rectangle& rCaretPixel, const OUString& rText)
 {
     m_sText = rText;
     m_bShowing = false;
@@ -41,14 +41,14 @@ void GhostTextWindow::showAt(const tools::Rectangle& rCaretPixel, const OUString
 
     vcl::Window* pParent = GetParent();
     if (!pParent)
-        return;
+        return false;
 
     const tools::Long nParentWidth = pParent->GetOutputSizePixel().Width();
     const tools::Long nX = rCaretPixel.Right() + 1;
     const tools::Long nMaxWidth = nParentWidth - nX;
 
     if (nMaxWidth <= 0)
-        return;
+        return false;
 
     if (nWidth > nMaxWidth)
         nWidth = nMaxWidth;
@@ -60,6 +60,7 @@ void GhostTextWindow::showAt(const tools::Rectangle& rCaretPixel, const OUString
     Show(true, ShowFlags::NoActivate | ShowFlags::NoFocusChange);
     Invalidate();
     m_bShowing = true;
+    return true;
 }
 
 void GhostTextWindow::hide()

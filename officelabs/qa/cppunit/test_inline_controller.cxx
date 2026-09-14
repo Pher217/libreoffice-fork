@@ -15,6 +15,7 @@
 #include <cppunit/plugin/TestPlugIn.h>
 
 #include <atomic>
+#include <optional>
 
 #include <com/sun/star/awt/Key.hpp>
 #include <com/sun/star/awt/KeyEvent.hpp>
@@ -32,6 +33,7 @@
 #include <com/sun/star/awt/XVclWindowPeer.hpp>
 
 #include <sfx2/viewsh.hxx>
+#include <tools/gen.hxx>
 #include <vcl/scheduler.hxx>
 #include <vcl/svapp.hxx>
 #include <vcl/window.hxx>
@@ -97,9 +99,19 @@ private:
         return pViewShell->GetWindow();
     }
 
+    /// Returns an injected caret rectangle provider that keeps the edit window
+    /// large enough for the clamp inside GhostTextWindow::showAt().
+    officelabs::InlineCompletionController::CaretProvider makeCaretProvider(vcl::Window* pEditWin)
+    {
+        if (pEditWin && pEditWin->GetOutputSizePixel().Width() < 100)
+            pEditWin->SetSizePixel(Size(800, 600));
+        return []() { return std::optional<tools::Rectangle>(
+                          tools::Rectangle(Point(10, 10), Size(1, 16))); };
+    }
+
     // 1. Fetcher returns 200 {"suggestions":[{"text":" jumps"}]} → after
-    // requestNow+deliver, pendingSuggestion() equals " jumps" (ghost may not
-    // show in headless because there is no cursor).
+    // requestNow+deliver, pendingSuggestion() equals " jumps" because the
+    // injected caret provider lets the ghost window show.
     void testAcceptSuggestion()
     {
         loadFromURL(u"private:factory/swriter"_ustr);
@@ -120,13 +132,15 @@ private:
         vcl::Window* pEditWin = getEditWindow();
         rtl::Reference<officelabs::InlineCompletionController> xController(
             new officelabs::InlineCompletionController(
-                xModel->getCurrentController(), xModel, pEditWin, aFetcher));
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin)));
         xController->start();
 
         xController->requestNow();
         drainUntilIdle(xController.get());
 
         CPPUNIT_ASSERT_EQUAL(u" jumps"_ustr, xController->pendingSuggestion());
+        CPPUNIT_ASSERT(xController->isGhostVisible());
 
         xController->dispose();
     }
@@ -149,7 +163,8 @@ private:
         vcl::Window* pEditWin = getEditWindow();
         rtl::Reference<officelabs::InlineCompletionController> xController(
             new officelabs::InlineCompletionController(
-                xModel->getCurrentController(), xModel, pEditWin, aFetcher));
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin)));
         xController->start();
 
         xController->requestNow();
@@ -179,7 +194,8 @@ private:
                 xModel->getCurrentController(), xModel, pEditWin,
                 [](const OString& /*rBody*/) {
                     return officelabs::InlineCompletionController::FetchResult{};
-                }));
+                },
+                makeCaretProvider(pEditWin)));
         xController->start();
 
         css::awt::KeyEvent aTab = makeKeyEvent(pEditWin, css::awt::Key::TAB);
@@ -215,7 +231,8 @@ private:
         vcl::Window* pEditWin = getEditWindow();
         rtl::Reference<officelabs::InlineCompletionController> xController(
             new officelabs::InlineCompletionController(
-                xModel->getCurrentController(), xModel, pEditWin, aFetcher));
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin)));
         xController->start();
 
         xController->requestNow();
@@ -259,7 +276,8 @@ private:
         vcl::Window* pEditWin = getEditWindow();
         rtl::Reference<officelabs::InlineCompletionController> xController(
             new officelabs::InlineCompletionController(
-                xModel->getCurrentController(), xModel, pEditWin, aFetcher));
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin)));
         xController->start();
 
         xController->requestNow();
@@ -303,7 +321,8 @@ private:
         vcl::Window* pEditWin = getEditWindow();
         rtl::Reference<officelabs::InlineCompletionController> xController(
             new officelabs::InlineCompletionController(
-                xModel->getCurrentController(), xModel, pEditWin, aFetcher));
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin)));
         xController->start();
 
         xController->requestNow();
@@ -341,7 +360,8 @@ private:
         vcl::Window* pEditWin = getEditWindow();
         rtl::Reference<officelabs::InlineCompletionController> xController(
             new officelabs::InlineCompletionController(
-                xModel->getCurrentController(), xModel, pEditWin, aFetcher));
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin)));
         xController->start();
 
         for (int i = 0; i < 3; ++i)
@@ -379,7 +399,8 @@ private:
         vcl::Window* pEditWin = getEditWindow();
         rtl::Reference<officelabs::InlineCompletionController> xController(
             new officelabs::InlineCompletionController(
-                xModel->getCurrentController(), xModel, pEditWin, aFetcher));
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin)));
         xController->start();
 
         xController->requestNow();
@@ -425,7 +446,8 @@ private:
         vcl::Window* pEditWin = getEditWindow();
         rtl::Reference<officelabs::InlineCompletionController> xController(
             new officelabs::InlineCompletionController(
-                xModel->getCurrentController(), xModel, pEditWin, aFetcher));
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin)));
         xController->start();
 
         xController->requestNow();
@@ -453,7 +475,8 @@ private:
         vcl::Window* pEditWin = getEditWindow();
         rtl::Reference<officelabs::InlineCompletionController> xController(
             new officelabs::InlineCompletionController(
-                xModel->getCurrentController(), xModel, pEditWin, aFetcher));
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin)));
         xController->start();
 
         xController->requestNow();
@@ -469,6 +492,42 @@ private:
         xController->dispose();
     }
 
+    // 11. Provider returns nullopt → a successful result does not become a
+    // suggestion and Tab returns false.
+    void testNoShowWhenCaretUnavailable()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        officelabs::InlineCompletionController::FetchResult aResponse;
+        aResponse.nStatus = 200;
+        aResponse.aBody = R"({"suggestions":[{"text":" jumps"}]})";
+        officelabs::InlineCompletionController::Fetcher aFetcher =
+            [aResponse](const OString& /*rBody*/) mutable { return aResponse; };
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        vcl::Window* pEditWin = getEditWindow();
+        officelabs::InlineCompletionController::CaretProvider aProvider =
+            []() { return std::optional<tools::Rectangle>(); };
+        rtl::Reference<officelabs::InlineCompletionController> xController(
+            new officelabs::InlineCompletionController(
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher, aProvider));
+        xController->start();
+
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+
+        CPPUNIT_ASSERT(xController->pendingSuggestion().isEmpty());
+        CPPUNIT_ASSERT(!xController->isGhostVisible());
+
+        css::awt::KeyEvent aTab = makeKeyEvent(pEditWin, css::awt::Key::TAB);
+        sal_Bool bHandled = xController->keyPressed(aTab);
+        CPPUNIT_ASSERT(!bHandled);
+
+        xController->dispose();
+    }
+
     CPPUNIT_TEST_SUITE(InlineCompletionControllerTest);
     CPPUNIT_TEST(testAcceptSuggestion);
     CPPUNIT_TEST(testTabAcceptsSuggestion);
@@ -480,6 +539,7 @@ private:
     CPPUNIT_TEST(testDisposeWhileInFlightSafe);
     CPPUNIT_TEST(testIneligibleNoRequest);
     CPPUNIT_TEST(testEscapeClearsSuggestion);
+    CPPUNIT_TEST(testNoShowWhenCaretUnavailable);
     CPPUNIT_TEST_SUITE_END();
 };
 
