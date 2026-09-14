@@ -38,6 +38,7 @@
 #include <vcl/keycod.hxx>
 #include <vcl/inputtypes.hxx>
 #include <vcl/keycodes.hxx>
+#include <vcl/officelabstheme.hxx>
 #include <vcl/opengl/OpenGLContext.hxx>
 #include <vcl/sysdata.hxx>
 #include <vcl/timer.hxx>
@@ -411,11 +412,8 @@ WinSalInstance::WinSalInstance()
 
     // OfficeLabs: set preferred app mode BEFORE any windows are created
     // so title bars respect the chosen theme from the start
-    static const std::string s_officeLabsThemeInit = [] {
-        const char* p = getenv("OFFICELABS_THEME");
-        return p ? std::string(p) : std::string();
-    }();
-    if (!s_officeLabsThemeInit.empty())
+    const vcl::officelabs::OLThemeSource& rOLTheme = vcl::officelabs::GetOLThemeSource();
+    if (rOLTheme.configured)
     {
         HINSTANCE hUxthemeLib = LoadLibraryExW(L"uxtheme.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
         if (hUxthemeLib)
@@ -425,9 +423,9 @@ WinSalInstance::WinSalInstance()
             if (auto SetPreferredAppMode = reinterpret_cast<SetPreferredAppMode_t>(
                     GetProcAddress(hUxthemeLib, MAKEINTRESOURCEA(135))))
             {
-                if (s_officeLabsThemeInit == "light")
+                if (rOLTheme.name == "light")
                     SetPreferredAppMode(ForceLight);
-                else if (s_officeLabsThemeInit == "dark")
+                else if (rOLTheme.name == "dark")
                     SetPreferredAppMode(ForceDark);
             }
             // Refresh the immersive color policy so Windows applies the change
