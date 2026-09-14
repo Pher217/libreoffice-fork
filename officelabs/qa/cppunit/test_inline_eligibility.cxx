@@ -24,6 +24,7 @@
 using officelabs::CursorContext;
 using officelabs::buildCompletionRequest;
 using officelabs::isEligible;
+using officelabs::isInlineCompletionEnabledValue;
 using officelabs::parseFirstSuggestion;
 using officelabs::sanitizeSuggestion;
 using officelabs::stillValid;
@@ -231,6 +232,48 @@ public:
         CPPUNIT_ASSERT_EQUAL(OUString(), parseFirstSuggestion("not json"));
     }
 
+    // GIVEN the toggle file is missing WHEN the value is interpreted THEN the
+    // default is ON.
+    void testIsInlineCompletionEnabledValue_missing()
+    {
+        CPPUNIT_ASSERT(isInlineCompletionEnabledValue("", false));
+    }
+
+    // GIVEN the toggle file contains exactly "off" WHEN the value is interpreted
+    // THEN the feature is OFF.
+    void testIsInlineCompletionEnabledValue_off()
+    {
+        CPPUNIT_ASSERT(!isInlineCompletionEnabledValue("off", true));
+    }
+
+    // GIVEN the toggle file contains " OFF\n" WHEN the value is interpreted
+    // THEN the feature is OFF (case-insensitive, trimmed).
+    void testIsInlineCompletionEnabledValue_offTrimmedCase()
+    {
+        CPPUNIT_ASSERT(!isInlineCompletionEnabledValue(" OFF\n", true));
+    }
+
+    // GIVEN the toggle file contains exactly "on" WHEN the value is interpreted
+    // THEN the feature is ON.
+    void testIsInlineCompletionEnabledValue_on()
+    {
+        CPPUNIT_ASSERT(isInlineCompletionEnabledValue("on", true));
+    }
+
+    // GIVEN the toggle file contains unknown content WHEN the value is
+    // interpreted THEN it defaults to ON.
+    void testIsInlineCompletionEnabledValue_garbage()
+    {
+        CPPUNIT_ASSERT(isInlineCompletionEnabledValue("garbage", true));
+    }
+
+    // GIVEN the toggle file is empty and exists WHEN the value is interpreted
+    // THEN it defaults to ON.
+    void testIsInlineCompletionEnabledValue_emptyExisting()
+    {
+        CPPUNIT_ASSERT(isInlineCompletionEnabledValue("", true));
+    }
+
     CPPUNIT_TEST_SUITE(InlineCompletionEligibilityTest);
     CPPUNIT_TEST(testIsEligible_selectionDisallowed);
     CPPUNIT_TEST(testIsEligible_readOnlyDisallowed);
@@ -252,6 +295,12 @@ public:
     CPPUNIT_TEST(testParseFirstSuggestion_returnsText);
     CPPUNIT_TEST(testParseFirstSuggestion_emptySuggestions);
     CPPUNIT_TEST(testParseFirstSuggestion_invalidJson);
+    CPPUNIT_TEST(testIsInlineCompletionEnabledValue_missing);
+    CPPUNIT_TEST(testIsInlineCompletionEnabledValue_off);
+    CPPUNIT_TEST(testIsInlineCompletionEnabledValue_offTrimmedCase);
+    CPPUNIT_TEST(testIsInlineCompletionEnabledValue_on);
+    CPPUNIT_TEST(testIsInlineCompletionEnabledValue_garbage);
+    CPPUNIT_TEST(testIsInlineCompletionEnabledValue_emptyExisting);
     CPPUNIT_TEST_SUITE_END();
 };
 

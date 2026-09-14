@@ -60,6 +60,9 @@ public:
     /// Injectable caret rectangle provider for testing geometry changes.
     using CaretProvider = std::function<std::optional<tools::Rectangle>()>;
 
+    /// Injectable switch reader: defaults to reading the per-user toggle file.
+    using EnabledProvider = std::function<bool()>;
+
     static Fetcher agentFetcher();
 
     InlineCompletionController(
@@ -67,7 +70,8 @@ public:
         const css::uno::Reference<css::frame::XModel>& xModel,
         vcl::Window* pEditWin,
         Fetcher aFetcher = agentFetcher(),
-        CaretProvider aCaretProvider = {});
+        CaretProvider aCaretProvider = {},
+        EnabledProvider aEnabledProvider = {});
 
     void start();
     void dispose();
@@ -98,6 +102,7 @@ private:
     void onResult(sal_uInt64 nGeneration, const FetchResult& rResult);
     void hideGhost();
     bool isComposing() const;
+    bool isEnabled() const;
 
     DECL_LINK(WindowEventHdl, VclWindowEvent&, void);
     DECL_LINK(TimerHdl, Timer*, void);
@@ -113,6 +118,7 @@ private:
 
     Fetcher m_aFetcher;
     CaretProvider m_aCaretProvider;
+    EnabledProvider m_aEnabledProvider;
     Timer m_aTimer;
     Timer m_aTrackTimer;
 

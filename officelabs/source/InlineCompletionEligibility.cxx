@@ -8,6 +8,7 @@
 #include <rtl/character.hxx>
 #include <rtl/strbuf.hxx>
 
+#include <cctype>
 #include <cstdio>
 #include <sstream>
 
@@ -81,6 +82,30 @@ OUString sanitizeSuggestion(const OUString& rSuggestion)
     if (sCut.trim().isEmpty())
         return OUString();
     return sCut;
+}
+
+bool isInlineCompletionEnabledValue(std::string_view aFileContent, bool bFileExists)
+{
+    if (!bFileExists)
+        return true;
+
+    const auto aEnd = aFileContent.end();
+    auto it = aFileContent.begin();
+    while (it != aEnd && static_cast<unsigned char>(*it) <= ' ')
+        ++it;
+    auto aTail = aEnd;
+    while (aTail != it && static_cast<unsigned char>(aTail[-1]) <= ' ')
+        --aTail;
+
+    constexpr std::string_view kOff = "off";
+    if (static_cast<std::size_t>(aTail - it) != kOff.size())
+        return true;
+    for (std::size_t i = 0; i < kOff.size(); ++i)
+    {
+        if (std::tolower(static_cast<unsigned char>(it[i])) != kOff[i])
+            return true;
+    }
+    return false;
 }
 
 OString buildCompletionRequest(const CursorContext& rContext)

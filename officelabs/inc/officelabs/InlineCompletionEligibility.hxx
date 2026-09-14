@@ -15,6 +15,7 @@
 #include <rtl/ustring.hxx>
 
 #include <string>
+#include <string_view>
 
 namespace officelabs {
 
@@ -42,6 +43,11 @@ OFFICELABS_DLLPUBLIC bool stillValid(const CursorContext& rRequested,
 /// and collapses a whitespace-only result to empty. A leading space is kept
 /// as returned by the agent -- only whitespace-only results are stripped.
 OFFICELABS_DLLPUBLIC OUString sanitizeSuggestion(const OUString& rSuggestion);
+
+/// Interprets the per-user inline-completion toggle file: ON by default
+/// (file missing), OFF only when the trimmed ASCII content equals "off"
+/// case-insensitively, and ON for any other readable content.
+OFFICELABS_DLLPUBLIC bool isInlineCompletionEnabledValue(std::string_view aFileContent, bool bFileExists);
 
 /// Builds the JSON body for POST /completions/: text_before (capped to its
 /// last 2000 characters), text_after, mode and max_suggestions.

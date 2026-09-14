@@ -18,6 +18,9 @@
 #include <com/sun/star/lang/XComponent.hpp>
 #include <com/sun/star/text/XTextDocument.hpp>
 
+#include <config_folders.h>
+#include <osl/file.hxx>
+#include <rtl/bootstrap.hxx>
 #include <rtl/strbuf.hxx>
 #include <rtl/string.hxx>
 #include <rtl/ustrbuf.hxx>
@@ -33,6 +36,7 @@
 
 #include <chrono>
 #include <sstream>
+#include <string_view>
 #include <thread>
 
 namespace officelabs {
@@ -65,12 +69,14 @@ InlineCompletionController::InlineCompletionController(
     const css::uno::Reference<css::frame::XModel>& xModel,
     vcl::Window* pEditWin,
     Fetcher aFetcher,
-    CaretProvider aCaretProvider)
+    CaretProvider aCaretProvider,
+    EnabledProvider aEnabledProvider)
     : m_xController(xController)
     , m_xModel(xModel)
     , m_pEditWin(pEditWin)
     , m_aFetcher(std::move(aFetcher))
     , m_aCaretProvider(std::move(aCaretProvider))
+    , m_aEnabledProvider(std::move(aEnabledProvider))
     , m_aTimer("officelabs InlineCompletion")
     , m_aTrackTimer("officelabs InlineCompletion track")
     , m_nGeneration(0)
@@ -87,6 +93,9 @@ InlineCompletionController::InlineCompletionController(
 
     if (!m_aCaretProvider)
         m_aCaretProvider = [this]() { return GhostTextWindow::caretRectPixel(m_pEditWin.get()); };
+
+    if (!m_aEnabledProvider)
+        m_aEnabledProvider = [this]() { return isEnabled(); };
 
     m_aTimer.SetTimeout(400); // ms
     m_aTimer.SetInvokeHandler(LINK(this, InlineCompletionController, TimerHdl));
@@ -229,8 +238,11 @@ void SAL_CALL InlineCompletionController::disposing(const css::lang::EventObject
 
 void InlineCompletionController::requestNow()
 {
-    if (m_bDisposed || m_bInFlight || isComposing())
+    if (m_bDisposed || m_bInFlight || isComposing() || !m_aEnabledProvider())
+    {
+        hideGhost();
         return;
+    }
 
     const sal_uInt64 nNow = tools::Time::GetSystemTicks();
     if (nNow < m_nBackoffUntilMs)
@@ -318,6 +330,24 @@ void InlineCompletionController::hideGhost()
 bool InlineCompletionController::isComposing() const
 {
     return OfficeLabsIsExtTextInputActive(m_pEditWin.get());
+}
+
+bool InlineCompletionController::isEnabled() const
+{
+    OUString aURL
+        = u"${$BRAND_BASE_DIR/" LIBO_ETC_FOLDER "/" SAL_CONFIGFILE("bootstrap")
+         ":UserInstallation}/user/officelabs/inline-completion.txt"_ustr;
+    rtl::Bootstrap::expandMacros(aURL);
+
+    osl::File aFile(aURL);
+    const bool bExists = aFile.open(osl_File_OpenFlag_Read) == osl::FileBase::E_None;
+    if (!bExists)
+        return isInlineCompletionEnabledValue({}, false);
+
+    char aBuffer[16]{};
+    sal_uInt64 nRead = 0;
+    aFile.read(aBuffer, sizeof(aBuffer), nRead);
+    return isInlineCompletionEnabledValue(std::string_view(aBuffer, nRead), true);
 }
 
 IMPL_LINK(InlineCompletionController, WindowEventHdl, VclWindowEvent&, rEvent, void)
