@@ -50,12 +50,14 @@
 #include <officelabs/CefInit.hxx>
 #include <officelabs/WebViewMessageHandler.hxx>
 #include <officelabs/DocumentController.hxx>
+#include <officelabs/InlineCompletionController.hxx>
 #include <officelabs/StudioWindow.hxx>
 
 #include <sfx2/bindings.hxx>
 #include <sfx2/dispatch.hxx>
 #include <sfx2/objsh.hxx>
 #include <sfx2/viewfrm.hxx>
+#include <sfx2/viewsh.hxx>
 #include <vcl/svapp.hxx>
 #include <vcl/syschild.hxx>
 #include <vcl/sysdata.hxx>
@@ -556,6 +558,12 @@ WebViewPanel::~WebViewPanel()
     // because syncCefWindowSize() fights with the visibility state before
     // the VCL parent is fully laid out.
 
+    if (m_xInlineCompletion)
+    {
+        m_xInlineCompletion->dispose();
+        m_xInlineCompletion.clear();
+    }
+
     // Clear instance copies (per-frame state keeps the real references alive)
     m_browser = nullptr;
     m_pNativeHost = nullptr;
@@ -830,6 +838,25 @@ void WebViewPanel::syncCefWindowSize()
 
 IMPL_LINK_NOARG(WebViewPanel, ResizeTimerHdl, Timer*, void)
 {
+    SfxViewShell* pViewShell = nullptr;
+    if (m_pBindings)
+    {
+        if (SfxDispatcher* pDispatcher = m_pBindings->GetDispatcher())
+        {
+            if (SfxViewFrame* pViewFrame = pDispatcher->GetFrame())
+                pViewShell = pViewFrame->GetViewShell();
+        }
+    }
+    if (!pViewShell)
+        pViewShell = SfxViewShell::Current();
+
+    if (pViewShell && pViewShell->GetWindow())
+    {
+        css::uno::Reference<css::frame::XController> xController = pViewShell->GetController();
+        if (!m_xInlineCompletion || m_xInlineCompletion->controller() != xController)
+            detectDocument();
+    }
+
     syncCefWindowSize();
     m_aResizeTimer.Start();  // Restart for next check
 }
@@ -898,13 +925,15 @@ void WebViewPanel::detectDocument()
 {
     SfxObjectShell* pShell = nullptr;
 
+    SfxViewFrame* pViewFrame = nullptr;
+
     // Strategy 1: Use SfxBindings -> Dispatcher -> ViewFrame -> ObjectShell
     if (m_pBindings)
     {
         SfxDispatcher* pDisp = m_pBindings->GetDispatcher();
         if (pDisp)
         {
-            SfxViewFrame* pViewFrame = pDisp->GetFrame();
+            pViewFrame = pDisp->GetFrame();
             if (pViewFrame)
                 pShell = pViewFrame->GetObjectShell();
         }
@@ -940,6 +969,24 @@ void WebViewPanel::detectDocument()
             pShell->GetModel(), css::uno::UNO_QUERY);
         if (xTextDoc.is())
             m_pDocController->setDocument(xTextDoc);
+
+        if (pViewFrame)
+        {
+            SfxViewShell* pViewShell = pViewFrame->GetViewShell();
+            css::uno::Reference<css::frame::XController> xController(
+                pViewShell ? pViewShell->GetController() : css::uno::Reference<css::frame::XController>());
+            if (xController.is() && pViewShell && pViewShell->GetWindow())
+            {
+                if (!m_xInlineCompletion || m_xInlineCompletion->controller() != xController)
+                {
+                    if (m_xInlineCompletion)
+                        m_xInlineCompletion->dispose();
+                    m_xInlineCompletion = new InlineCompletionController(
+                        xController, pShell->GetModel(), pViewShell->GetWindow());
+                    m_xInlineCompletion->start();
+                }
+            }
+        }
     }
     else if (sAppType == "calc")
     {
@@ -954,6 +1001,12 @@ void WebViewPanel::detectDocument()
             pShell->GetModel(), css::uno::UNO_QUERY);
         if (xDrawDoc.is())
             m_pDocController->setImpressDocument(xDrawDoc);
+    }
+
+    if (sAppType != "writer" && m_xInlineCompletion)
+    {
+        m_xInlineCompletion->dispose();
+        m_xInlineCompletion.clear();
     }
 }
 

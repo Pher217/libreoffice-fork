@@ -4347,7 +4347,8 @@
             <desc>Specifies whether the suggestions for the automatic word completion are displayed on the screen.</desc>
             <label>Show suggestions</label>
           </info>
-          <value>true</value>
+          <!-- OfficeLabs: off by default; inline ghost text (officelabs) replaces it. Users can re-enable it. -->
+          <value>false</value>
         </prop>
         <prop oor:name="MinWordLen" oor:type="xs:int" oor:nillable="false">
           <!-- UIHints: Tools  AutoCorrect/AutoFormat  WordCompletion  min. word length -->

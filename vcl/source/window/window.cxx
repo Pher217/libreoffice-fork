@@ -49,6 +49,7 @@
 #include <vcl/ptrstyle.hxx>
 #include <vcl/IDialogRenderable.hxx>
 
+#include <vcl/officelabs/extinput.hxx>
 #include <vcl/uitest/uiobject.hxx>
 
 #include <ImplOutDevData.hxx>
@@ -4023,5 +4024,10 @@ css::awt::DeviceInfo WindowOutputDevice::GetDeviceInfo() const
 
 
 } /* namespace vcl */
+
+bool OfficeLabsIsExtTextInputActive(const vcl::Window* pWindow)
+{
+    return pWindow && pWindow->ImplGetWindowImpl()->mbExtTextInput;
+}
 
 /* vim:set shiftwidth=4 softtabstop=4 expandtab: */
