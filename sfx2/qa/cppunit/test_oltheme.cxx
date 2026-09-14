@@ -14,9 +14,11 @@
 #include <cppunit/plugin/TestPlugIn.h>
 
 #include <sidebar/OfficelabsTheme.hxx>
+#include <vcl/officelabstheme.hxx>
 
 using sfx2::sidebar::GetOLAppearanceMode;
 using sfx2::sidebar::OLTheme;
+using vcl::officelabs::ResolveOLTheme;
 
 namespace
 {
@@ -68,6 +70,64 @@ public:
 };
 
 CPPUNIT_TEST_SUITE_REGISTRATION(OLThemeAppearanceTest);
+
+// Resolution order shared by vcl and sfx2: user profile file > env var > install
+// share file > "midnight-blue" (unconfigured).
+class OLThemeResolveTest : public CppUnit::TestFixture
+{
+public:
+    // GIVEN a user file, an env var and a share file all set WHEN resolved THEN
+    // the user file wins.
+    void testUserFileWinsOverEnvAndShare()
+    {
+        CPPUNIT_ASSERT_EQUAL(std::string("light"), ResolveOLTheme("light", "dark", "midnight-blue").name);
+    }
+
+    // GIVEN no user file but an env var and a share file WHEN resolved THEN the
+    // env var wins.
+    void testEnvWinsOverShareWhenUserFileEmpty()
+    {
+        CPPUNIT_ASSERT_EQUAL(std::string("dark"), ResolveOLTheme("", "dark", "midnight-blue").name);
+    }
+
+    // GIVEN no user file and no env var but a share file WHEN resolved THEN the
+    // share file is used.
+    void testShareUsedWhenUserFileAndEnvEmpty()
+    {
+        CPPUNIT_ASSERT_EQUAL(std::string("midnight-blue"), ResolveOLTheme("", nullptr, "midnight-blue").name);
+    }
+
+    // GIVEN an empty env var string WHEN resolved THEN it is ignored in favour
+    // of the share file.
+    void testEmptyEnvStringIsIgnored()
+    {
+        CPPUNIT_ASSERT_EQUAL(std::string("midnight-blue"), ResolveOLTheme("", "", "midnight-blue").name);
+    }
+
+    // GIVEN nothing configured WHEN resolved THEN the name defaults to
+    // "midnight-blue".
+    void testNothingConfiguredDefaultsToMidnightBlue()
+    {
+        CPPUNIT_ASSERT_EQUAL(std::string("midnight-blue"), ResolveOLTheme("", nullptr, "").name);
+    }
+
+    // GIVEN nothing configured WHEN resolved THEN configured is false.
+    void testNothingConfiguredIsNotConfigured()
+    {
+        CPPUNIT_ASSERT(!ResolveOLTheme("", nullptr, "").configured);
+    }
+
+    CPPUNIT_TEST_SUITE(OLThemeResolveTest);
+    CPPUNIT_TEST(testUserFileWinsOverEnvAndShare);
+    CPPUNIT_TEST(testEnvWinsOverShareWhenUserFileEmpty);
+    CPPUNIT_TEST(testShareUsedWhenUserFileAndEnvEmpty);
+    CPPUNIT_TEST(testEmptyEnvStringIsIgnored);
+    CPPUNIT_TEST(testNothingConfiguredDefaultsToMidnightBlue);
+    CPPUNIT_TEST(testNothingConfiguredIsNotConfigured);
+    CPPUNIT_TEST_SUITE_END();
+};
+
+CPPUNIT_TEST_SUITE_REGISTRATION(OLThemeResolveTest);
 }
 
 CPPUNIT_PLUGIN_IMPLEMENT();

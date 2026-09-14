@@ -49,6 +49,7 @@
 #include <o3tl/char16_t2wchar_t.hxx>
 
 #include <vcl/event.hxx>
+#include <vcl/officelabstheme.hxx>
 #include <vcl/sysdata.hxx>
 #include <vcl/timer.hxx>
 #include <vcl/settings.hxx>
@@ -96,7 +97,6 @@
 #include <shellapi.h>
 #include <uxtheme.h>
 #include <Vssym32.h>
-#include <fstream>
 #include <string>
 
 using namespace ::com::sun::star;
@@ -271,26 +271,8 @@ static void UpdateDarkMode(HWND hWnd)
     if (!hUxthemeLib)
         return;
 
-    // OfficeLabs: read theme from config file.
-    // Read theme: light / midnight-blue / dark
-    std::string olTheme = "midnight-blue";
-    {
-        wchar_t exePath[MAX_PATH] = {};
-        GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-        std::wstring ws(exePath);
-        auto pos = ws.rfind(L"\\program\\");
-        if (pos != std::wstring::npos)
-        {
-            std::wstring confPath = ws.substr(0, pos) + L"\\share\\officelabs_theme.txt";
-            std::ifstream f(confPath);
-            if (f.is_open())
-            {
-                std::getline(f, olTheme);
-                while (!olTheme.empty() && (olTheme.back() == '\r' || olTheme.back() == '\n' || olTheme.back() == ' '))
-                    olTheme.pop_back();
-            }
-        }
-    }
+    // OfficeLabs: read theme: light / midnight-blue / dark
+    std::string olTheme = vcl::officelabs::GetOLThemeSource().name;
 
     typedef PreferredAppMode(WINAPI* SetPreferredAppMode_t)(PreferredAppMode);
     auto SetPreferredAppMode = reinterpret_cast<SetPreferredAppMode_t>(GetProcAddress(hUxthemeLib, MAKEINTRESOURCEA(135)));
@@ -5801,20 +5783,6 @@ static LRESULT CALLBACK SalFrameWndProc( HWND hWnd, UINT nMsg, WPARAM wParam, LP
 
             UpdateAutoAccel();
             UpdateDarkMode(hWnd);
-
-            // OfficeLabs: force title bar light/dark via env var
-            // This overrides after UpdateDarkMode in case config wasn't loaded yet
-            {
-                static const std::string s_olThemeWmCreate = [] {
-                    const char* p = getenv("OFFICELABS_THEME");
-                    return p ? std::string(p) : std::string();
-                }();
-                if (!s_olThemeWmCreate.empty())
-                {
-                    BOOL bDark = (s_olThemeWmCreate == "dark") ? TRUE : FALSE;
-                    DwmSetWindowAttribute(hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &bDark, sizeof(bDark));
-                }
-            }
 
             // Set HWND already here, as data might be used already
             // when messages are being sent by CreateWindow()
