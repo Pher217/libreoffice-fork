@@ -20,6 +20,12 @@ $(eval $(call gb_WinResTarget_add_defs,sofficebin/officeloader,\
 
 $(eval $(call gb_WinResTarget_add_dependencies,sofficebin/officeloader,\
     sysui/desktop/icons/soffice.ico \
+	sysui/desktop/icons/writer_app.ico \
+	sysui/desktop/icons/calc_app.ico \
+	sysui/desktop/icons/draw_app.ico \
+	sysui/desktop/icons/impress_app.ico \
+	sysui/desktop/icons/base_app.ico \
+	sysui/desktop/icons/math_app.ico \
 	sysui/desktop/icons/oasis-database.ico \
 	sysui/desktop/icons/oasis-drawing-template.ico \
 	sysui/desktop/icons/oasis-drawing.ico \
