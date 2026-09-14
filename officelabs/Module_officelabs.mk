@@ -7,6 +7,10 @@ $(eval $(call gb_Module_add_targets,officelabs,\
     UIConfig_officelabs \
 ))
 
+$(eval $(call gb_Module_add_check_targets,officelabs,\
+    CppunitTest_officelabs_inline \
+))
+
 # CEF WebView support (conditional on --with-cef)
 ifeq ($(ENABLE_CEF),TRUE)
 $(eval $(call gb_Module_add_targets,officelabs,\

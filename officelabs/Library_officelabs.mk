@@ -38,6 +38,7 @@ $(eval $(call gb_Library_use_externals,officelabs,\
 $(eval $(call gb_Library_add_exception_objects,officelabs,\
     officelabs/source/AgentIdentity \
     officelabs/source/DocumentController \
+    officelabs/source/InlineCompletionEligibility \
 ))
 
 # === CEF WebView support (conditional on --with-cef) ===
@@ -83,6 +84,7 @@ endif
 $(eval $(call gb_Library_add_exception_objects,officelabs,\
     officelabs/source/CefInit \
     officelabs/source/ConsentBridge \
+    officelabs/source/AgentHttp \
     officelabs/source/TrustedUrl \
     officelabs/source/StudioWindow \
     officelabs/source/WebViewPanel \
