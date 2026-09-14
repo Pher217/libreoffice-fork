@@ -14,6 +14,10 @@ $(eval $(call gb_Module_add_check_targets,officelabs,\
 
 # CEF WebView support (conditional on --with-cef)
 ifeq ($(ENABLE_CEF),TRUE)
+$(eval $(call gb_Module_add_check_targets,officelabs,\
+	CppunitTest_officelabs_controller \
+))
+
 $(eval $(call gb_Module_add_targets,officelabs,\
     Executable_officelabs_cef_subprocess \
     Package_cef \

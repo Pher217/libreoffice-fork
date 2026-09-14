@@ -50,13 +50,16 @@
 #include <include/wrapper/cef_message_router.h>
 
 #include <vcl/timer.hxx>
+#include <rtl/ref.hxx>
 #include <memory>
 
 class SfxBindings;
+class SfxViewShell;
 
 namespace officelabs {
 
 class DocumentController;
+class InlineCompletionController;
 class WebViewMessageHandler;
 
 class OFFICELABS_DLLPUBLIC WebViewPanel final : public PanelLayout
@@ -158,6 +161,10 @@ private:
 
     // Backend document bridge (per-panel — rebuilt on each attach)
     std::unique_ptr<DocumentController> m_pDocController;
+
+    // Writer inline-completion key handler, wired to the current frame's edit
+    // window and controller. Recreated when the frame/controller changes.
+    rtl::Reference<InlineCompletionController> m_xInlineCompletion;
 
     // NOTE: CefClient, CefMessageRouter, WebViewMessageHandler, and the
     // INativeCefHost are NOT per-instance — they live in static per-frame
