@@ -27,6 +27,7 @@
 #include <include/cef_browser.h>
 
 #include <sal/log.hxx>
+#include <vcl/svapp.hxx>
 #include <osl/file.hxx>
 #include <osl/module.hxx>
 #include <rtl/bootstrap.hxx>
@@ -114,6 +115,14 @@ bool CefInit::initialize()
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_bInitialized)
         return true;
+
+    // Headless runs (--headless, unit tests) have no real native frames: on Windows the
+    // headless frame handle is not an HWND, and CEF aborts creating a child of it.
+    if (Application::IsHeadlessModeEnabled())
+    {
+        SAL_INFO("officelabs.cef", "headless mode: CEF not started");
+        return false;
+    }
 
 #ifdef MACOSX
     // Load the CEF framework at runtime before any other CEF call. The loader
