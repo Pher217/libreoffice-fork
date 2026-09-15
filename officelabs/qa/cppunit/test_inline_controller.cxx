@@ -567,6 +567,57 @@ private:
         xController->dispose();
     }
 
+    // 13. Static ghostTextColor on a light page blends black onto white,
+    // per VS Code's editorGhostText light ratio (alpha 119/255).
+    void testGhostTextColorLightPage()
+    {
+        const Color aResult = officelabs::GhostTextWindow::ghostTextColor(COL_WHITE);
+        CPPUNIT_ASSERT_EQUAL(Color(0x88, 0x88, 0x88), aResult);
+    }
+
+    // 14. Static ghostTextColor on a dark page blends white onto the page
+    // color, per VS Code's editorGhostText dark ratio (alpha 86/255).
+    void testGhostTextColorDarkPage()
+    {
+        const Color aResult = officelabs::GhostTextWindow::ghostTextColor(Color(0x1E, 0x1E, 0x1E));
+        CPPUNIT_ASSERT_EQUAL(Color(0x69, 0x69, 0x69), aResult);
+    }
+
+    // 15. Injected FontProvider returning a "Liberation Mono" font → after
+    // requestNow+drain the ghost is visible and rendered in that font.
+    void testFontProviderAppliesDocFont()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        officelabs::InlineCompletionController::FetchResult aResponse;
+        aResponse.nStatus = 200;
+        aResponse.aBody = R"({"suggestions":[{"text":" jumps"}]})";
+        officelabs::InlineCompletionController::Fetcher aFetcher =
+            [aResponse](const OString& /*rBody*/) mutable { return aResponse; };
+
+        officelabs::InlineCompletionController::FontProvider aFontProvider = []() {
+            return std::optional<vcl::Font>(vcl::Font(u"Liberation Mono"_ustr, Size(0, 16)));
+        };
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        vcl::Window* pEditWin = getEditWindow();
+        rtl::Reference<officelabs::InlineCompletionController> xController(
+            new officelabs::InlineCompletionController(
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin), makeEnabledProvider(), aFontProvider));
+        xController->start();
+
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+
+        CPPUNIT_ASSERT(xController->isGhostVisible());
+        CPPUNIT_ASSERT_EQUAL(u"Liberation Mono"_ustr, xController->ghostFontFamily());
+
+        xController->dispose();
+    }
+
     CPPUNIT_TEST_SUITE(InlineCompletionControllerTest);
     CPPUNIT_TEST(testAcceptSuggestion);
     CPPUNIT_TEST(testTabAcceptsSuggestion);
@@ -580,6 +631,9 @@ private:
     CPPUNIT_TEST(testEscapeClearsSuggestion);
     CPPUNIT_TEST(testNoShowWhenCaretUnavailable);
     CPPUNIT_TEST(testDisabledProviderNoRequest);
+    CPPUNIT_TEST(testGhostTextColorLightPage);
+    CPPUNIT_TEST(testGhostTextColorDarkPage);
+    CPPUNIT_TEST(testFontProviderAppliesDocFont);
     CPPUNIT_TEST_SUITE_END();
 };
 

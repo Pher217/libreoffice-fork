@@ -12,7 +12,9 @@
 
 #include <officelabs/officelabsdllapi.h>
 #include <rtl/ustring.hxx>
+#include <tools/color.hxx>
 #include <tools/gen.hxx>
+#include <vcl/font.hxx>
 #include <vcl/window.hxx>
 #include <vcl/vclptr.hxx>
 
@@ -28,8 +30,11 @@ public:
     explicit GhostTextWindow(vcl::Window* pEditWin);
 
     /// Show the ghost text immediately to the right of the caret rectangle.
-    /// If there is no room, the window is hidden instead.
-    bool showAt(const tools::Rectangle& rCaretPixel, const OUString& rText);
+    /// If there is no room, the window is hidden instead. When rDocFont is
+    /// present, it is used verbatim (its height already in pixels); when
+    /// absent the app font sized to caret height is used.
+    bool showAt(const tools::Rectangle& rCaretPixel, const OUString& rText,
+                const std::optional<vcl::Font>& rDocFont = std::nullopt);
 
     /// Hide the window and clear the stored text.
     void hide();
@@ -42,6 +47,11 @@ public:
     /// available (no cursor, or a non-vertical cursor -- the latter cannot
     /// be queried from the current public Cursor API).
     static std::optional<tools::Rectangle> caretRectPixel(vcl::Window* pEditWin);
+
+    /// Compute the ghost-text color for a given page background, matching
+    /// VS Code's editorGhostText: black at alpha 119/255 on a light page,
+    /// white at alpha 86/255 on a dark page, blended onto the background.
+    static Color ghostTextColor(Color aPageBackground);
 
 protected:
     virtual void Paint(vcl::RenderContext& rRC, const tools::Rectangle& rRect) override;

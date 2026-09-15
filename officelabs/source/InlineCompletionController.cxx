@@ -30,11 +30,13 @@
 #include <vcl/commandevent.hxx>
 #include <vcl/officelabs/extinput.hxx>
 #include <vcl/svapp.hxx>
+#include <vcl/unohelp.hxx>
 
 #include <boost/property_tree/json_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <sstream>
 #include <string_view>
 #include <thread>
@@ -70,13 +72,15 @@ InlineCompletionController::InlineCompletionController(
     vcl::Window* pEditWin,
     Fetcher aFetcher,
     CaretProvider aCaretProvider,
-    EnabledProvider aEnabledProvider)
+    EnabledProvider aEnabledProvider,
+    FontProvider aFontProvider)
     : m_xController(xController)
     , m_xModel(xModel)
     , m_pEditWin(pEditWin)
     , m_aFetcher(std::move(aFetcher))
     , m_aCaretProvider(std::move(aCaretProvider))
     , m_aEnabledProvider(std::move(aEnabledProvider))
+    , m_aFontProvider(std::move(aFontProvider))
     , m_aTimer("officelabs InlineCompletion")
     , m_aTrackTimer("officelabs InlineCompletion track")
     , m_nGeneration(0)
@@ -96,6 +100,9 @@ InlineCompletionController::InlineCompletionController(
 
     if (!m_aEnabledProvider)
         m_aEnabledProvider = [this]() { return isEnabled(); };
+
+    if (!m_aFontProvider)
+        m_aFontProvider = [this]() { return cursorDocFont(); };
 
     m_aTimer.SetTimeout(400); // ms
     m_aTimer.SetInvokeHandler(LINK(this, InlineCompletionController, TimerHdl));
@@ -306,7 +313,7 @@ void InlineCompletionController::onResult(sal_uInt64 nGeneration, const FetchRes
     if (!m_pGhost)
         m_pGhost = VclPtr<GhostTextWindow>::Create(m_pEditWin.get());
 
-    if (!m_pGhost->showAt(*aRect, sSuggestion))
+    if (!m_pGhost->showAt(*aRect, sSuggestion, m_aFontProvider ? m_aFontProvider() : std::nullopt))
     {
         hideGhost();
         return;
@@ -348,6 +355,30 @@ bool InlineCompletionController::isEnabled() const
     sal_uInt64 nRead = 0;
     aFile.read(aBuffer, sizeof(aBuffer), nRead);
     return isInlineCompletionEnabledValue(std::string_view(aBuffer, nRead), true);
+}
+
+std::optional<vcl::Font> InlineCompletionController::cursorDocFont()
+{
+    if (!m_pEditWin)
+        return std::nullopt;
+
+    std::optional<CursorCharFont> aCharFont = m_aDoc.getCursorCharFont();
+    if (!aCharFont)
+        return std::nullopt;
+
+    const sal_Int32 nTwips = static_cast<sal_Int32>(std::lround(aCharFont->heightPt * 20));
+    const tools::Long nHeightPixel
+        = m_pEditWin->LogicToPixel(Size(0, nTwips)).Height();
+    if (nHeightPixel < 1)
+        return std::nullopt;
+
+    vcl::Font aFont;
+    aFont.SetFamilyName(aCharFont->familyName);
+    aFont.SetFontHeight(nHeightPixel);
+    aFont.SetWeight(vcl::unohelper::ConvertFontWeight(aCharFont->weight));
+    aFont.SetItalic(vcl::unohelper::ConvertFontSlant(aCharFont->slant));
+
+    return aFont;
 }
 
 IMPL_LINK(InlineCompletionController, WindowEventHdl, VclWindowEvent&, rEvent, void)
