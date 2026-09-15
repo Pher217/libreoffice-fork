@@ -14,6 +14,8 @@
 #include <vcl/settings.hxx>
 #include <vcl/vclenum.hxx>
 
+#include <algorithm>
+
 namespace officelabs {
 
 GhostTextWindow::GhostTextWindow(vcl::Window* pEditWin)
@@ -61,10 +63,15 @@ bool GhostTextWindow::showAt(const tools::Rectangle& rCaretPixel, const OUString
     if (nWidth > nMaxWidth)
         nWidth = nMaxWidth;
 
-    const tools::Long nY = rCaretPixel.Top();
+    // A document font can be taller than the caret (tight line spacing, large
+    // sizes). Grow the window around the caret's vertical centre so the text
+    // is not clipped; Paint centres the text, which lines up with the
+    // document text at normal sizes.
     const tools::Long nCaretHeight = rCaretPixel.GetHeight();
+    const tools::Long nHeight = std::max(nCaretHeight, GetTextHeight());
+    const tools::Long nY = std::max<tools::Long>(0, rCaretPixel.Top() - (nHeight - nCaretHeight) / 2);
 
-    SetPosSizePixel(Point(nX, nY), Size(nWidth, nCaretHeight));
+    SetPosSizePixel(Point(nX, nY), Size(nWidth, nHeight));
     Show(true, ShowFlags::NoActivate | ShowFlags::NoFocusChange);
     Invalidate();
     m_bShowing = true;

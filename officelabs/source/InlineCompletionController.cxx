@@ -323,7 +323,7 @@ void InlineCompletionController::onResult(sal_uInt64 nGeneration, const FetchRes
     if (!m_pGhost)
         m_pGhost = VclPtr<GhostTextWindow>::Create(m_pEditWin.get());
 
-    if (!m_pGhost->showAt(*aRect, sSuggestion, m_aFontProvider ? m_aFontProvider() : std::nullopt))
+    if (!m_pGhost->showAt(*aRect, sSuggestion, m_aFontProvider()))
     {
         hideGhost();
         return;

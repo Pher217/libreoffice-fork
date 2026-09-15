@@ -99,6 +99,9 @@ public:
     OUString pendingSuggestion() const { return m_pGhost && m_pGhost->isShowing() ? m_sSuggestion : OUString(); }
     bool isInFlight() const { return m_bInFlight; }
     OUString ghostFontFamily() const { return m_pGhost ? m_pGhost->GetFont().GetFamilyName() : OUString(); }
+    tools::Long ghostFontHeight() const { return m_pGhost ? m_pGhost->GetFont().GetFontHeight() : 0; }
+    tools::Long ghostTextHeight() const { return m_pGhost ? m_pGhost->GetTextHeight() : 0; }
+    tools::Long ghostWindowHeight() const { return m_pGhost ? m_pGhost->GetOutputSizePixel().Height() : 0; }
 
 private:
     ~InlineCompletionController();

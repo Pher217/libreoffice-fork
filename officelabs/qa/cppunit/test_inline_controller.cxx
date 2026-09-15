@@ -19,6 +19,7 @@
 
 #include <com/sun/star/awt/Key.hpp>
 #include <com/sun/star/awt/KeyEvent.hpp>
+#include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/frame/XController.hpp>
 #include <com/sun/star/frame/XModel.hpp>
 #include <com/sun/star/lang/XMultiServiceFactory.hpp>
@@ -35,6 +36,7 @@
 #include <sfx2/viewsh.hxx>
 #include <tools/gen.hxx>
 #include <vcl/scheduler.hxx>
+#include <vcl/settings.hxx>
 #include <vcl/svapp.hxx>
 #include <vcl/window.hxx>
 
@@ -688,6 +690,83 @@ private:
         xController->dispose();
     }
 
+    /// Creates a controller whose fetcher returns " jumps", with the given
+    /// font provider (empty = the controller's default), and shows the ghost.
+    rtl::Reference<officelabs::InlineCompletionController>
+    showWithFontProvider(officelabs::InlineCompletionController::FontProvider aFontProvider)
+    {
+        officelabs::InlineCompletionController::Fetcher aFetcher = [](const OString& /*rBody*/) {
+            return officelabs::InlineCompletionController::FetchResult{
+                200, R"({"suggestions":[{"text":" jumps"}]})"};
+        };
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        vcl::Window* pEditWin = getEditWindow();
+        rtl::Reference<officelabs::InlineCompletionController> xController(
+            new officelabs::InlineCompletionController(
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin), makeEnabledProvider(), std::move(aFontProvider)));
+        xController->start();
+
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+        CPPUNIT_ASSERT(xController->isGhostVisible());
+        return xController;
+    }
+
+    // 18. GIVEN 18 pt text at the caret and no injected font provider WHEN a
+    // suggestion is shown THEN the ghost font height is 18 pt in edit-window pixels.
+    void testDefaultFontProviderUsesCursorHeight()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+        Reference<text::XText> xText = xTextDoc->getText();
+        Reference<beans::XPropertySet> xRange(xText->createTextCursorByRange(xText), UNO_QUERY_THROW);
+        xRange->setPropertyValue(u"CharHeight"_ustr, Any(float(18)));
+
+        rtl::Reference<officelabs::InlineCompletionController> xController = showWithFontProvider({});
+
+        const tools::Long nExpected = getEditWindow()->LogicToPixel(Size(0, 18 * 20)).Height();
+        CPPUNIT_ASSERT_EQUAL(nExpected, xController->ghostFontHeight());
+
+        xController->dispose();
+    }
+
+    // 19. GIVEN a font provider that finds no font WHEN a suggestion is shown
+    // THEN the ghost falls back to the UI app font.
+    void testNoDocFontFallsBackToAppFont()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        rtl::Reference<officelabs::InlineCompletionController> xController
+            = showWithFontProvider([]() { return std::optional<vcl::Font>(); });
+
+        const OUString aAppFamily
+            = getEditWindow()->GetSettings().GetStyleSettings().GetAppFont().GetFamilyName();
+        CPPUNIT_ASSERT_EQUAL(aAppFamily, xController->ghostFontFamily());
+
+        xController->dispose();
+    }
+
+    // 20. GIVEN a 40 px document font and a 16 px caret WHEN a suggestion is
+    // shown THEN the ghost window is as tall as the text, so nothing is clipped.
+    void testTallFontGrowsGhostWindow()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        rtl::Reference<officelabs::InlineCompletionController> xController = showWithFontProvider(
+            []() { return std::optional<vcl::Font>(vcl::Font(u"Liberation Serif"_ustr, Size(0, 40))); });
+
+        CPPUNIT_ASSERT_EQUAL(xController->ghostTextHeight(), xController->ghostWindowHeight());
+
+        xController->dispose();
+    }
+
     CPPUNIT_TEST_SUITE(InlineCompletionControllerTest);
     CPPUNIT_TEST(testAcceptSuggestion);
     CPPUNIT_TEST(testTabAcceptsSuggestion);
@@ -706,6 +785,9 @@ private:
     CPPUNIT_TEST(testGhostTextColorLightPage);
     CPPUNIT_TEST(testGhostTextColorDarkPage);
     CPPUNIT_TEST(testFontProviderAppliesDocFont);
+    CPPUNIT_TEST(testDefaultFontProviderUsesCursorHeight);
+    CPPUNIT_TEST(testNoDocFontFallsBackToAppFont);
+    CPPUNIT_TEST(testTallFontGrowsGhostWindow);
     CPPUNIT_TEST_SUITE_END();
 };
 
