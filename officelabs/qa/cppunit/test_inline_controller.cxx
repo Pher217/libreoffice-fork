@@ -567,6 +567,76 @@ private:
         xController->dispose();
     }
 
+    /// Shows a suggestion, then presses and releases Escape. Returns the
+    /// controller; nCalls counts fetcher calls.
+    rtl::Reference<officelabs::InlineCompletionController> showThenEscape(int& nCalls)
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        officelabs::InlineCompletionController::Fetcher aFetcher =
+            [&nCalls](const OString& /*rBody*/) {
+                ++nCalls;
+                return officelabs::InlineCompletionController::FetchResult{
+                    200, R"({"suggestions":[{"text":" jumps"}]})"};
+            };
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        vcl::Window* pEditWin = getEditWindow();
+        rtl::Reference<officelabs::InlineCompletionController> xController(
+            new officelabs::InlineCompletionController(
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin), makeEnabledProvider()));
+        xController->start();
+
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+        CPPUNIT_ASSERT(xController->isGhostVisible());
+
+        css::awt::KeyEvent aEscape = makeKeyEvent(pEditWin, css::awt::Key::ESCAPE);
+        xController->keyPressed(aEscape);
+        xController->keyReleased(aEscape);
+        return xController;
+    }
+
+    // 13. GIVEN a suggestion dismissed with Escape WHEN the debounce fires again
+    // with the text unchanged THEN no new request is made.
+    void testEscapeSuppressesRefetch()
+    {
+        int nCalls = 0;
+        rtl::Reference<officelabs::InlineCompletionController> xController = showThenEscape(nCalls);
+
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+
+        CPPUNIT_ASSERT_EQUAL(1, nCalls);
+
+        xController->dispose();
+    }
+
+    // 14. GIVEN a suggestion dismissed with Escape WHEN the paragraph text then
+    // changes and the debounce fires THEN a new request is made.
+    void testEscapeSuppressionEndsWhenTextChanges()
+    {
+        int nCalls = 0;
+        rtl::Reference<officelabs::InlineCompletionController> xController = showThenEscape(nCalls);
+
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        xTextDoc->getText()->setString(u"The quick brown fox runs"_ustr);
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        Reference<text::XTextViewCursorSupplier> xViewCursorSupplier(
+            xModel->getCurrentController(), UNO_QUERY_THROW);
+        xViewCursorSupplier->getViewCursor()->gotoEnd(false);
+
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+
+        CPPUNIT_ASSERT_EQUAL(2, nCalls);
+
+        xController->dispose();
+    }
+
     CPPUNIT_TEST_SUITE(InlineCompletionControllerTest);
     CPPUNIT_TEST(testAcceptSuggestion);
     CPPUNIT_TEST(testTabAcceptsSuggestion);
@@ -580,6 +650,8 @@ private:
     CPPUNIT_TEST(testEscapeClearsSuggestion);
     CPPUNIT_TEST(testNoShowWhenCaretUnavailable);
     CPPUNIT_TEST(testDisabledProviderNoRequest);
+    CPPUNIT_TEST(testEscapeSuppressesRefetch);
+    CPPUNIT_TEST(testEscapeSuppressionEndsWhenTextChanges);
     CPPUNIT_TEST_SUITE_END();
 };
 
