@@ -186,6 +186,18 @@ public:
     }
 
     // CefRequestHandler
+    /// Ctrl+click / middle-click open a new tab here, never via OnBeforePopup --
+    /// same reasoning as the sidebar client. Same-tab navigation still goes
+    /// through OnBeforeBrowse below.
+    bool OnOpenURLFromTab(CefRefPtr<CefBrowser> /*browser*/,
+                          CefRefPtr<CefFrame> /*frame*/,
+                          const CefString& /*target_url*/,
+                          CefRequestHandler::WindowOpenDisposition target_disposition,
+                          bool /*user_gesture*/) override
+    {
+        return target_disposition != CEF_WOD_CURRENT_TAB;
+    }
+
     ///
     /// The confinement half of the token boundary, repeated here on purpose.
     /// The Studio is a SECOND WebView that answers getSessionToken, so it needs
