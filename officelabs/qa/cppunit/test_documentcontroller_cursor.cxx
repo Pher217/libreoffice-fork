@@ -35,6 +35,7 @@
 
 using namespace css;
 using namespace css::uno;
+using officelabs::CursorCharFont;
 using officelabs::CursorContext;
 
 namespace
@@ -361,6 +362,74 @@ public:
         CPPUNIT_ASSERT_EQUAL(sBeforeInsert, xText->getString());
     }
 
+    // GIVEN a Writer document whose paragraph is set to "Liberation Mono" at
+    // the end
+    // WHEN getCursorCharFont is read
+    // THEN familyName is "Liberation Mono".
+    void testCursorCharFont_familyName()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDocument(mxComponent, UNO_QUERY_THROW);
+        Reference<text::XText> xText = xTextDocument->getText();
+        xText->setString(u"The quick brown fox"_ustr);
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+
+        Reference<text::XTextViewCursorSupplier> xViewCursorSupplier(
+            xModel->getCurrentController(), UNO_QUERY_THROW);
+        Reference<text::XTextViewCursor> xViewCursor = xViewCursorSupplier->getViewCursor();
+        xViewCursor->gotoStart(false);
+        xViewCursor->gotoEnd(true);
+
+        Reference<beans::XPropertySet> xCursorProps(xViewCursor, UNO_QUERY_THROW);
+        xCursorProps->setPropertyValue(u"CharFontName"_ustr, Any(u"Liberation Mono"_ustr));
+        xCursorProps->setPropertyValue(u"CharHeight"_ustr, Any(float(18)));
+
+        xViewCursor->gotoEnd(false);
+
+        officelabs::DocumentController aController;
+        aController.setModel(xModel);
+        aController.setDocument(xTextDocument);
+
+        const std::optional<CursorCharFont> aFont = aController.getCursorCharFont();
+        CPPUNIT_ASSERT(aFont.has_value());
+        CPPUNIT_ASSERT_EQUAL(u"Liberation Mono"_ustr, aFont->familyName);
+    }
+
+    // GIVEN a Writer document whose paragraph is set to CharHeight 18 at the
+    // end
+    // WHEN getCursorCharFont is read
+    // THEN heightPt is 18.
+    void testCursorCharFont_heightPt()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDocument(mxComponent, UNO_QUERY_THROW);
+        Reference<text::XText> xText = xTextDocument->getText();
+        xText->setString(u"The quick brown fox"_ustr);
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+
+        Reference<text::XTextViewCursorSupplier> xViewCursorSupplier(
+            xModel->getCurrentController(), UNO_QUERY_THROW);
+        Reference<text::XTextViewCursor> xViewCursor = xViewCursorSupplier->getViewCursor();
+        xViewCursor->gotoStart(false);
+        xViewCursor->gotoEnd(true);
+
+        Reference<beans::XPropertySet> xCursorProps(xViewCursor, UNO_QUERY_THROW);
+        xCursorProps->setPropertyValue(u"CharFontName"_ustr, Any(u"Liberation Mono"_ustr));
+        xCursorProps->setPropertyValue(u"CharHeight"_ustr, Any(float(18)));
+
+        xViewCursor->gotoEnd(false);
+
+        officelabs::DocumentController aController;
+        aController.setModel(xModel);
+        aController.setDocument(xTextDocument);
+
+        const std::optional<CursorCharFont> aFont = aController.getCursorCharFont();
+        CPPUNIT_ASSERT(aFont.has_value());
+        CPPUNIT_ASSERT_EQUAL(float(18), aFont->heightPt);
+    }
+
     CPPUNIT_TEST_SUITE(DocumentControllerCursorTest);
     CPPUNIT_TEST(testCursorContext_endOfParagraph);
     CPPUNIT_TEST(testCursorContext_afterFourChars);
@@ -373,6 +442,8 @@ public:
     CPPUNIT_TEST(testInsertAtCursor_recordsRedline);
     CPPUNIT_TEST(testInsertAtCursor_emptyStringReturnsFalse);
     CPPUNIT_TEST(testInsertAtCursor_protectedSectionIsReadOnly);
+    CPPUNIT_TEST(testCursorCharFont_familyName);
+    CPPUNIT_TEST(testCursorCharFont_heightPt);
     CPPUNIT_TEST_SUITE_END();
 };
 

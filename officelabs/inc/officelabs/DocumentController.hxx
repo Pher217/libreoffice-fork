@@ -26,10 +26,23 @@
 #include <com/sun/star/table/XCell.hpp>
 #include <com/sun/star/drawing/XDrawPagesSupplier.hpp>
 #include <com/sun/star/drawing/XDrawPage.hpp>
+#include <com/sun/star/awt/FontSlant.hpp>
 #include <officelabs/officelabsdllapi.h>
 #include <rtl/ustring.hxx>
 
+#include <optional>
+
 namespace officelabs {
+
+/// The character font at the view cursor, as read from CharFontName /
+/// CharHeight / CharWeight / CharPosture.
+struct CursorCharFont
+{
+    OUString familyName;
+    float heightPt = 0;
+    float weight = 0;
+    css::awt::FontSlant slant = css::awt::FontSlant_NONE;
+};
 
 class OFFICELABS_DLLPUBLIC DocumentController
 {
@@ -60,6 +73,7 @@ public:
     OUString getSelectedText();
 
     CursorContext getCursorContext();
+    std::optional<CursorCharFont> getCursorCharFont();
     bool insertAtCursor(const OUString& rText);
 };
 
