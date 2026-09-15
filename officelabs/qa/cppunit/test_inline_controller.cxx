@@ -596,8 +596,48 @@ private:
 
         css::awt::KeyEvent aEscape = makeKeyEvent(pEditWin, css::awt::Key::ESCAPE);
         xController->keyPressed(aEscape);
-        xController->keyReleased(aEscape);
         return xController;
+    }
+
+    // 15. GIVEN a request still in flight WHEN Escape is pressed before the
+    // suggestion arrives and the debounce fires again THEN no new request is made.
+    void testEscapeWhileInFlightSuppressesRefetch()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        std::atomic<int> nCalls{ 0 };
+        std::atomic<bool> bRelease{ false };
+        officelabs::InlineCompletionController::Fetcher aFetcher =
+            [&nCalls, &bRelease](const OString& /*rBody*/) {
+                ++nCalls;
+                while (!bRelease.load())
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                return officelabs::InlineCompletionController::FetchResult{
+                    200, R"({"suggestions":[{"text":" jumps"}]})"};
+            };
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        vcl::Window* pEditWin = getEditWindow();
+        rtl::Reference<officelabs::InlineCompletionController> xController(
+            new officelabs::InlineCompletionController(
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin), makeEnabledProvider()));
+        xController->start();
+
+        xController->requestNow();
+        CPPUNIT_ASSERT(xController->isInFlight());
+        xController->keyPressed(makeKeyEvent(pEditWin, css::awt::Key::ESCAPE));
+        bRelease = true;
+        drainUntilIdle(xController.get());
+
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+
+        CPPUNIT_ASSERT_EQUAL(1, nCalls.load());
+
+        xController->dispose();
     }
 
     // 13. GIVEN a suggestion dismissed with Escape WHEN the debounce fires again
@@ -652,6 +692,7 @@ private:
     CPPUNIT_TEST(testDisabledProviderNoRequest);
     CPPUNIT_TEST(testEscapeSuppressesRefetch);
     CPPUNIT_TEST(testEscapeSuppressionEndsWhenTextChanges);
+    CPPUNIT_TEST(testEscapeWhileInFlightSuppressesRefetch);
     CPPUNIT_TEST_SUITE_END();
 };
 
