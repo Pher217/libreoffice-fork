@@ -65,6 +65,21 @@ public:
     // GIVEN a negative number WHEN the port is parsed THEN it is 0.
     void testNegativeDisables() { CPPUNIT_ASSERT_EQUAL(0, parseRemoteDebuggingPort("-9222")); }
 
+    // GIVEN a leading zero WHEN the port is parsed THEN it is read as decimal 9222.
+    void testLeadingZero() { CPPUNIT_ASSERT_EQUAL(9222, parseRemoteDebuggingPort("09222")); }
+
+    // GIVEN whitespace inside the digits WHEN the port is parsed THEN it is 0.
+    void testInteriorWhitespaceDisables()
+    {
+        CPPUNIT_ASSERT_EQUAL(0, parseRemoteDebuggingPort("92 22"));
+    }
+
+    // GIVEN a tab before and a newline after WHEN the port is parsed THEN it is 9222.
+    void testTrimsTabAndNewline()
+    {
+        CPPUNIT_ASSERT_EQUAL(9222, parseRemoteDebuggingPort("\t9222\n"));
+    }
+
     CPPUNIT_TEST_SUITE(CefDebugPortTest);
     CPPUNIT_TEST(testUnsetDisables);
     CPPUNIT_TEST(testEmptyDisables);
@@ -78,6 +93,9 @@ public:
     CPPUNIT_TEST(testAboveRangeDisables);
     CPPUNIT_TEST(testOverflowDisables);
     CPPUNIT_TEST(testNegativeDisables);
+    CPPUNIT_TEST(testLeadingZero);
+    CPPUNIT_TEST(testInteriorWhitespaceDisables);
+    CPPUNIT_TEST(testTrimsTabAndNewline);
     CPPUNIT_TEST_SUITE_END();
 };
 
