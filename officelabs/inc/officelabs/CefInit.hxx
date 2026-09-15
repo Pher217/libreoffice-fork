@@ -7,7 +7,7 @@
  *
  * Key settings:
  *   no_sandbox = true
- *   remote_debugging_port = 9222
+ *   remote_debugging_port = OFFICELABS_CEF_DEBUG_PORT, off when unset
  *   Message loop: Windows uses multi_threaded_message_loop (CEF owns its own
  *     thread); macOS uses external_message_pump instead (does not exist on
  *     mac) and pumps CefDoMessageLoopWork() from OfficelabsBrowserApp.
@@ -41,8 +41,6 @@ public:
     // Path to the CEF subprocess: officelabs_cef_subprocess(.exe) on
     // Windows/Linux, the "OfficeLabs Helper" .app bundle executable on macOS.
     OUString getSubprocessPath() const;
-
-    int getRemoteDebuggingPort() const { return 9222; }
 
 private:
     CefInit();

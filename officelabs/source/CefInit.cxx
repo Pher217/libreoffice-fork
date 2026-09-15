@@ -19,6 +19,7 @@
 #include <postwin.h>
 #endif
 
+#include <officelabs/CefDebugPort.hxx>
 #include <officelabs/CefInit.hxx>
 #include <officelabs/WebViewPanel.hxx>
 #include <officelabs/StudioWindow.hxx>
@@ -165,8 +166,10 @@ bool CefInit::initialize()
     // No sandbox - LibreOffice doesn't support CEF's sandbox model
     settings.no_sandbox = true;
 
-    // Remote debugging for Chrome DevTools
-    settings.remote_debugging_port = 9222;
+    // DevTools/CDP only when a developer opts in: an open port lets any local
+    // process script the sidebar and its document bridge (see CefDebugPort.hxx).
+    const int nDebugPort = parseRemoteDebuggingPort(std::getenv(CEF_DEBUG_PORT_ENV));
+    settings.remote_debugging_port = nDebugPort;
 
     // Disable windowless rendering - we use a real HWND
     settings.windowless_rendering_enabled = false;
@@ -258,7 +261,7 @@ bool CefInit::initialize()
     }
 
     m_bInitialized = true;
-    SAL_INFO("officelabs.cef", "CEF initialized successfully (debug port 9222)");
+    SAL_INFO("officelabs.cef", "CEF initialized successfully (debug port " << nDebugPort << ")");
 
 #ifdef MACOSX
     // Drive CEF with a 30Hz heartbeat. The pure on-demand external pump
