@@ -207,6 +207,7 @@ namespace officelabs {
 // CefClient implementation for this panel
 // ============================================================
 class WebViewCefClient final : public CefClient,
+                                public CefCommandHandler,
                                 public CefLifeSpanHandler,
                                 public CefRequestHandler,
                                 public CefKeyboardHandler,
@@ -227,10 +228,22 @@ public:
     void setBrowser(CefRefPtr<CefBrowser> b) { m_browser = b; }
 
     // CefClient
+    CefRefPtr<CefCommandHandler> GetCommandHandler() override { return this; }
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
     CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
     CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
     CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+
+    /// No Chrome browser commands. Chrome style honours shortcuts such as
+    /// Ctrl+N / Ctrl+T / Ctrl+H by opening "New Tab - Chromium" windows that
+    /// OnBeforePopup never sees; CefShutdown() then crashes on those unknown
+    /// browsers, which turned every theme restart into a crash (#165).
+    bool OnChromeCommand(CefRefPtr<CefBrowser> /*browser*/, int command_id,
+                         cef_window_open_disposition_t /*disposition*/) override
+    {
+        SAL_INFO("officelabs.cef", "Blocked Chrome command " << command_id);
+        return true;
+    }
 
     // CefKeyboardHandler — intercept LO-bound hotkeys before CEF handles them.
     // When the AI sidebar has keyboard focus (user clicked into the chat input),
@@ -277,6 +290,19 @@ public:
     }
 
     // CefRequestHandler
+    /// Ctrl+click and middle-click on a link never reach OnBeforePopup: Chrome
+    /// style opens them as a new tab here, an unmanaged browser on a possibly
+    /// remote URL that also crashes CefShutdown(). Only same-tab navigation may
+    /// proceed, and OnBeforeBrowse still confines that to our own UI.
+    bool OnOpenURLFromTab(CefRefPtr<CefBrowser> /*browser*/,
+                          CefRefPtr<CefFrame> /*frame*/,
+                          const CefString& /*target_url*/,
+                          CefRequestHandler::WindowOpenDisposition target_disposition,
+                          bool /*user_gesture*/) override
+    {
+        return target_disposition != CEF_WOD_CURRENT_TAB;
+    }
+
     bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
                         CefRefPtr<CefFrame> frame,
                         CefRefPtr<CefRequest> request,
