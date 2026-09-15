@@ -142,8 +142,9 @@ void TitleBarUpdate::impl_updateApplicationID(const css::uno::Reference< css::fr
         else
             sDesktopName = "Startcenter";
 #if defined(_WIN32)
-        // We use a hardcoded product name matching the registry keys so applications can be associated with file types
-        sApplicationID = "TheDocumentFoundation.LibreOffice." + sDesktopName;
+        // OfficeLabs: its own AppUserModelID. LibreOffice's ID made Windows group OfficeLabs
+        // windows with an installed LibreOffice and show LibreOffice's taskbar icon.
+        sApplicationID = "CreativePandas.OfficeLabs." + sDesktopName;
 #else
         sApplicationID = utl::ConfigManager::getProductName().toAsciiLowerCase() + "-" + sDesktopName.toAsciiLowerCase();
 #endif
