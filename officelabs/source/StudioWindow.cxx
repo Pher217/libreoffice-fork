@@ -104,6 +104,7 @@ OUString studioUrl()
  * requestConsent -- work exactly as they do in the sidebar.
  * ------------------------------------------------------------------------- */
 class StudioClient final : public CefClient,
+                           public CefCommandHandler,
                            public CefLifeSpanHandler,
                            public CefRequestHandler,
                            public CefLoadHandler
@@ -127,9 +128,19 @@ public:
     }
 
     // CefClient
+    CefRefPtr<CefCommandHandler> GetCommandHandler() override { return this; }
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
     CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
     CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+
+    /// No Chrome browser commands -- same reasoning as the sidebar client:
+    /// Ctrl+N / Ctrl+T would open browsers CefShutdown() does not know about.
+    bool OnChromeCommand(CefRefPtr<CefBrowser> /*browser*/, int command_id,
+                         cef_window_open_disposition_t /*disposition*/) override
+    {
+        SAL_INFO("officelabs.cef", "Blocked Chrome command " << command_id);
+        return true;
+    }
 
     bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser,
                                   CefRefPtr<CefFrame> frame,
