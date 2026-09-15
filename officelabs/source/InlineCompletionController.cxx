@@ -212,6 +212,9 @@ sal_Bool SAL_CALL InlineCompletionController::keyPressed(const css::awt::KeyEven
         if (nCode == css::awt::Key::ESCAPE)
         {
             hideGhost();
+            // keyReleased restarts the debounce for every key, Escape included,
+            // which used to fetch and show the same suggestion again.
+            m_oDismissed = m_aDoc.getCursorContext();
             return true;
         }
     }
@@ -251,6 +254,13 @@ void InlineCompletionController::requestNow()
     CursorContext c = m_aDoc.getCursorContext();
     if (!isEligible(c))
         return;
+
+    if (m_oDismissed)
+    {
+        if (m_oDismissed->textBefore == c.textBefore && m_oDismissed->textAfter == c.textAfter)
+            return;
+        m_oDismissed.reset();
+    }
 
     m_aRequested = c;
     m_bInFlight = true;

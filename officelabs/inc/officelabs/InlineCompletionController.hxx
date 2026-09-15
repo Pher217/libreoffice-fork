@@ -130,6 +130,9 @@ private:
     sal_uInt64 m_nBackoffUntilMs;
 
     CursorContext m_aRequested;
+    /// Context the user dismissed with Escape; no new request until the text
+    /// around the caret differs from it.
+    std::optional<CursorContext> m_oDismissed;
 
     OUString m_sSuggestion;
     std::optional<tools::Rectangle> m_aShownRect;
