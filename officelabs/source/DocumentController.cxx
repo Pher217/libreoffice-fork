@@ -487,6 +487,44 @@ CursorContext DocumentController::getCursorContext()
     return aContext;
 }
 
+std::optional<CursorCharFont> DocumentController::getCursorCharFont()
+{
+    try
+    {
+        if (!m_xController.is())
+            return std::nullopt;
+
+        uno::Reference<text::XTextViewCursorSupplier> xViewCursorSupplier(m_xController,
+                                                                          uno::UNO_QUERY);
+        if (!xViewCursorSupplier.is())
+            return std::nullopt;
+
+        uno::Reference<text::XTextViewCursor> xViewCursor = xViewCursorSupplier->getViewCursor();
+        if (!xViewCursor.is())
+            return std::nullopt;
+
+        uno::Reference<beans::XPropertySet> xCursorProps(xViewCursor, uno::UNO_QUERY);
+        if (!xCursorProps.is())
+            return std::nullopt;
+
+        CursorCharFont aFont;
+        if (!(xCursorProps->getPropertyValue(u"CharFontName"_ustr) >>= aFont.familyName)
+            || aFont.familyName.isEmpty())
+            return std::nullopt;
+
+        xCursorProps->getPropertyValue(u"CharHeight"_ustr) >>= aFont.heightPt;
+        xCursorProps->getPropertyValue(u"CharWeight"_ustr) >>= aFont.weight;
+        xCursorProps->getPropertyValue(u"CharPosture"_ustr) >>= aFont.slant;
+
+        return aFont;
+    }
+    catch (const uno::Exception&)
+    {
+        SAL_WARN("officelabs", "DocumentController::getCursorCharFont failed");
+        return std::nullopt;
+    }
+}
+
 bool DocumentController::insertAtCursor(const OUString& rText)
 {
     if (rText.isEmpty())

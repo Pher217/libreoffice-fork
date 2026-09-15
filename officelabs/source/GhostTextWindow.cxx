@@ -14,6 +14,8 @@
 #include <vcl/settings.hxx>
 #include <vcl/vclenum.hxx>
 
+#include <algorithm>
+
 namespace officelabs {
 
 GhostTextWindow::GhostTextWindow(vcl::Window* pEditWin)
@@ -24,17 +26,25 @@ GhostTextWindow::GhostTextWindow(vcl::Window* pEditWin)
     SetBackground(Wallpaper(svtools::ColorConfig().GetColorValue(svtools::DOCCOLOR).nColor));
 }
 
-bool GhostTextWindow::showAt(const tools::Rectangle& rCaretPixel, const OUString& rText)
+bool GhostTextWindow::showAt(const tools::Rectangle& rCaretPixel, const OUString& rText,
+                              const std::optional<vcl::Font>& rDocFont)
 {
     m_sText = rText;
     m_bShowing = false;
 
-    vcl::Font aFont(GetSettings().GetStyleSettings().GetAppFont());
-    tools::Long nHeight = rCaretPixel.GetHeight() * 4 / 5;
-    if (nHeight < 1)
-        nHeight = 1;
-    aFont.SetFontHeight(nHeight);
-    SetFont(aFont);
+    if (rDocFont)
+    {
+        SetFont(*rDocFont);
+    }
+    else
+    {
+        vcl::Font aFont(GetSettings().GetStyleSettings().GetAppFont());
+        tools::Long nHeight = rCaretPixel.GetHeight() * 4 / 5;
+        if (nHeight < 1)
+            nHeight = 1;
+        aFont.SetFontHeight(nHeight);
+        SetFont(aFont);
+    }
 
     const tools::Long nTextWidth = GetTextWidth(rText);
     tools::Long nWidth = nTextWidth + 2;
@@ -53,10 +63,15 @@ bool GhostTextWindow::showAt(const tools::Rectangle& rCaretPixel, const OUString
     if (nWidth > nMaxWidth)
         nWidth = nMaxWidth;
 
-    const tools::Long nY = rCaretPixel.Top();
+    // A document font can be taller than the caret (tight line spacing, large
+    // sizes). Grow the window around the caret's vertical centre so the text
+    // is not clipped; Paint centres the text, which lines up with the
+    // document text at normal sizes.
     const tools::Long nCaretHeight = rCaretPixel.GetHeight();
+    const tools::Long nHeight = std::max(nCaretHeight, GetTextHeight());
+    const tools::Long nY = std::max<tools::Long>(0, rCaretPixel.Top() - (nHeight - nCaretHeight) / 2);
 
-    SetPosSizePixel(Point(nX, nY), Size(nWidth, nCaretHeight));
+    SetPosSizePixel(Point(nX, nY), Size(nWidth, nHeight));
     Show(true, ShowFlags::NoActivate | ShowFlags::NoFocusChange);
     Invalidate();
     m_bShowing = true;
@@ -75,8 +90,10 @@ void GhostTextWindow::Paint(vcl::RenderContext& rRC, const tools::Rectangle& /*r
     if (m_sText.isEmpty())
         return;
 
+    const Color aPageBackground(svtools::ColorConfig().GetColorValue(svtools::DOCCOLOR).nColor);
+
     rRC.SetFont(GetFont());
-    rRC.SetTextColor(GetSettings().GetStyleSettings().GetDisableColor());
+    rRC.SetTextColor(ghostTextColor(aPageBackground));
 
     const tools::Long nTextHeight = rRC.GetTextHeight();
     const tools::Long nWinHeight = GetOutputSizePixel().Height();
@@ -108,6 +125,19 @@ std::optional<tools::Rectangle> GhostTextWindow::caretRectPixel(vcl::Window* pEd
     }
 
     return aRect;
+}
+
+Color GhostTextWindow::ghostTextColor(Color aPageBackground)
+{
+    const int nFg = aPageBackground.IsDark() ? 255 : 0;
+    const int nAlpha = aPageBackground.IsDark() ? 86 : 119;
+
+    auto blend = [nFg, nAlpha](sal_uInt8 nBg) -> sal_uInt8 {
+        return static_cast<sal_uInt8>(static_cast<int>(nBg) + (nFg - static_cast<int>(nBg)) * nAlpha / 255);
+    };
+
+    return Color(blend(aPageBackground.GetRed()), blend(aPageBackground.GetGreen()),
+                 blend(aPageBackground.GetBlue()));
 }
 
 } // namespace officelabs
