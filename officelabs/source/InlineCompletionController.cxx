@@ -226,6 +226,11 @@ sal_Bool SAL_CALL InlineCompletionController::keyPressed(const css::awt::KeyEven
         }
     }
 
+    // Escape before a pending suggestion arrived dismisses it just the same.
+    // A bare Escape with nothing pending records nothing.
+    if (nCode == css::awt::Key::ESCAPE && m_bInFlight)
+        m_oDismissed = m_aDoc.getCursorContext();
+
     hideGhost();
     ++m_nGeneration;
     m_aTimer.Stop();
