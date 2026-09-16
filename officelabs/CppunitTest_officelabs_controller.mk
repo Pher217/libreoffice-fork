@@ -16,8 +16,31 @@ $(eval $(call gb_CppunitTest_set_include,officelabs_controller,\
 
 $(eval $(call gb_CppunitTest_add_exception_objects,officelabs_controller, \
     officelabs/qa/cppunit/test_inline_controller \
+))
+
+# The WebViewMessageHandler header is entirely behind HAVE_FEATURE_CEF, and its
+# CEF wrapper headers are only on the include path when CEF is configured. A test
+# for it therefore needs the same defines and includes the library gets, and must
+# not be compiled at all without them -- otherwise the header expands to nothing
+# and every symbol in the test is undeclared.
+ifeq ($(ENABLE_CEF),TRUE)
+
+$(eval $(call gb_CppunitTest_add_defs,officelabs_controller,\
+    -DHAVE_FEATURE_CEF \
+))
+
+$(eval $(call gb_CppunitTest_set_include,officelabs_controller,\
+    $$(INCLUDE) \
+    -I$(SRCDIR)/officelabs/inc \
+    -I$(CEF_DIR) \
+    -I$(CEF_DIR)/include \
+))
+
+$(eval $(call gb_CppunitTest_add_exception_objects,officelabs_controller, \
     officelabs/qa/cppunit/test_webview_message_handler \
 ))
+
+endif
 
 $(eval $(call gb_CppunitTest_use_libraries,officelabs_controller, \
     officelabs \

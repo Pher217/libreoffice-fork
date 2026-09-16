@@ -133,7 +133,13 @@ private:
     Timer m_aTrackTimer;
 
     std::atomic<sal_uInt64> m_nGeneration;
+    // Written and read only on the VCL thread (requestNow, onResult); the
+    // fetch thread touches neither this nor m_bRequestPending.
     std::atomic<bool> m_bInFlight;
+    // A debounce fire that arrived while a request was in flight. Without this,
+    // the fire is swallowed and nothing re-arms the one-shot timer, so the
+    // text typed during the round trip never gets a request of its own.
+    bool m_bRequestPending;
     bool m_bDisposed;
 
     int m_nFailures;
