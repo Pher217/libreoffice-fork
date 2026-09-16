@@ -14,6 +14,9 @@
  *   requestConsent  - Run the native consent dialog for a challenge (P0b, D9)
  *   requestOfficeRestart - Ask LibreOffice to restart itself (theme applies
  *                          after a restart)
+ *   getActiveTheme  - The theme this process actually resolved at startup
+ *                      (include/vcl/officelabstheme.hxx), as opposed to the
+ *                      agent's saved-but-possibly-pending theme.txt.
  *
  * THREADING: m_pPanel is std::atomic because it's read on the CEF IO
  *            thread (OnQuery) and written on the VCL thread (setPanel).
@@ -37,6 +40,10 @@
 #include <atomic>
 
 namespace officelabs {
+
+/// Pure JSON serialization of the getActiveTheme response, split out from
+/// handleGetActiveTheme so it is unit-testable without a CefBrowser/CefFrame.
+OFFICELABS_DLLPUBLIC std::string buildActiveThemeJson(const std::string& themeName);
 
 class WebViewPanel;
 
@@ -70,6 +77,7 @@ private:
     void handleGetSessionToken(CefRefPtr<Callback> callback);
     void handleRequestConsent(const std::string& json, CefRefPtr<Callback> callback);
     void handleRequestOfficeRestart(CefRefPtr<Callback> callback);
+    void handleGetActiveTheme(CefRefPtr<Callback> callback);
 
     std::atomic<WebViewPanel*> m_pPanel;
 };
