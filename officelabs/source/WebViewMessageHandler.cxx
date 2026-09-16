@@ -22,6 +22,8 @@
 #include <officelabs/AgentIdentity.hxx>
 #include <officelabs/ConsentBridge.hxx>
 
+#include <vcl/officelabstheme.hxx>
+
 #include <sal/log.hxx>
 #include <vcl/svapp.hxx>
 #include <tools/link.hxx>
@@ -124,6 +126,28 @@ std::string extractJsonString(const std::string& json, const std::string& key)
 
 } // anonymous namespace
 
+std::string buildActiveThemeJson(const std::string& themeName)
+{
+    // themeName comes from GetOLThemeSource(), not page script, but it can
+    // trace back to a file on disk (theme.txt / officelabs_theme.txt) --
+    // escape it the same way the other handlers escape untrusted strings.
+    std::string escaped;
+    escaped.reserve(themeName.size() + 16);
+    for (char c : themeName)
+    {
+        switch (c)
+        {
+            case '"':  escaped += "\\\""; break;
+            case '\\': escaped += "\\\\"; break;
+            case '\n': escaped += "\\n";  break;
+            case '\r': escaped += "\\r";  break;
+            case '\t': escaped += "\\t";  break;
+            default:   escaped += c;      break;
+        }
+    }
+    return "{\"theme\":\"" + escaped + "\"}";
+}
+
 WebViewMessageHandler::WebViewMessageHandler(WebViewPanel* pPanel)
     : m_pPanel(pPanel)
 {
@@ -217,6 +241,13 @@ bool WebViewMessageHandler::OnQuery(
         || req.find("\"type\": \"requestOfficeRestart\"") != std::string::npos)
     {
         handleRequestOfficeRestart(callback);
+        return true;
+    }
+
+    if (req.find("\"type\":\"getActiveTheme\"") != std::string::npos
+        || req.find("\"type\": \"getActiveTheme\"") != std::string::npos)
+    {
+        handleGetActiveTheme(callback);
         return true;
     }
 
@@ -511,6 +542,17 @@ void WebViewMessageHandler::handleRequestOfficeRestart(CefRefPtr<Callback> callb
             cb->Failure(500, "restart request failed");
         }
     });
+}
+
+// The sidebar's mount-time theme must match what LibreOffice actually resolved
+// at process start, not the agent's saved-but-possibly-pending theme.txt --
+// see WebViewMessageHandler.hxx. GetOLThemeSource() resolves once (static
+// local) and is cheap thereafter, so this answers inline like
+// handleGetSessionToken rather than dispatching to the VCL thread.
+void WebViewMessageHandler::handleGetActiveTheme(CefRefPtr<Callback> callback)
+{
+    const std::string sTheme = vcl::officelabs::GetOLThemeSource().name;
+    callback->Success(buildActiveThemeJson(sTheme));
 }
 
 } // namespace officelabs

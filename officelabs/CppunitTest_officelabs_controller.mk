@@ -16,6 +16,7 @@ $(eval $(call gb_CppunitTest_set_include,officelabs_controller,\
 
 $(eval $(call gb_CppunitTest_add_exception_objects,officelabs_controller, \
     officelabs/qa/cppunit/test_inline_controller \
+    officelabs/qa/cppunit/test_webview_message_handler \
 ))
 
 $(eval $(call gb_CppunitTest_use_libraries,officelabs_controller, \
