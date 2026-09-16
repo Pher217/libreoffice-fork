@@ -690,6 +690,71 @@ private:
         xController->dispose();
     }
 
+    // GIVEN a request in flight WHEN the user keeps typing, so the debounce
+    // fires again and is suppressed, THEN the suppressed fire is re-armed once
+    // the reply lands and a fresh request is made for the newer text.
+    //
+    // This is the trace-1 failure: the in-flight reply arrives stale (every
+    // keyPressed bumps the generation) and, because the user has stopped
+    // typing, nothing re-arms the one-shot timer -- so the text they actually
+    // finished never gets a request at all.
+    void testSuppressedDebounceFireIsReArmed()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        std::atomic<int> nCalls{ 0 };
+        std::atomic<bool> bRelease{ false };
+        officelabs::InlineCompletionController::Fetcher aFetcher =
+            [&nCalls, &bRelease](const OString& /*rBody*/) {
+                ++nCalls;
+                while (!bRelease.load())
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                return officelabs::InlineCompletionController::FetchResult{
+                    200, R"({"suggestions":[{"text":" jumps"}]})"};
+            };
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        vcl::Window* pEditWin = getEditWindow();
+        rtl::Reference<officelabs::InlineCompletionController> xController(
+            new officelabs::InlineCompletionController(
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin), makeEnabledProvider()));
+        xController->start();
+
+        xController->requestNow();
+        CPPUNIT_ASSERT(xController->isInFlight());
+
+        // nCalls is incremented on the fetcher thread, which requestNow only
+        // spawns -- wait for it to actually enter the fetcher before counting.
+        for (int i = 0; i < 200 && nCalls.load() == 0; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        CPPUNIT_ASSERT_EQUAL(1, nCalls.load());
+
+        // The user types on: the generation moves past the in-flight request,
+        // and the debounce fire that follows is suppressed.
+        xController->keyPressed(makeKeyEvent(pEditWin, css::awt::Key::A));
+        xController->requestNow();
+        CPPUNIT_ASSERT_EQUAL(1, nCalls.load());
+
+        bRelease = true;
+        drainUntilIdle(xController.get());
+
+        // The reply was dropped as stale, but the suppressed fire must have
+        // been re-armed, so a second request follows without further typing.
+        bool bSecond = false;
+        for (int i = 0; i < 150 && !bSecond; ++i)
+        {
+            Application::Reschedule(true);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            bSecond = nCalls.load() == 2;
+        }
+        CPPUNIT_ASSERT_EQUAL(2, nCalls.load());
+
+        xController->dispose();
+    }
+
     // 13. GIVEN a suggestion dismissed with Escape WHEN the debounce fires again
     // with the text unchanged THEN no new request is made.
     void testEscapeSuppressesRefetch()
@@ -872,6 +937,7 @@ private:
     CPPUNIT_TEST(testEscapeSuppressesRefetch);
     CPPUNIT_TEST(testEscapeSuppressionEndsWhenTextChanges);
     CPPUNIT_TEST(testEscapeWhileInFlightSuppressesRefetch);
+    CPPUNIT_TEST(testSuppressedDebounceFireIsReArmed);
     CPPUNIT_TEST(testGhostTextColorLightPage);
     CPPUNIT_TEST(testGhostTextColorDarkPage);
     CPPUNIT_TEST(testFontProviderAppliesDocFont);
