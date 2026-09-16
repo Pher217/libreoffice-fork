@@ -85,6 +85,7 @@ InlineCompletionController::InlineCompletionController(
     , m_aTrackTimer("officelabs InlineCompletion track")
     , m_nGeneration(0)
     , m_bInFlight(false)
+    , m_bRequestPending(false)
     , m_bDisposed(false)
     , m_nFailures(0)
     , m_nBackoffUntilMs(0)
@@ -270,9 +271,20 @@ void SAL_CALL InlineCompletionController::disposing(const css::lang::EventObject
 
 void InlineCompletionController::requestNow()
 {
-    if (m_bDisposed || m_bInFlight || isComposing() || !m_aEnabledProvider())
+    if (m_bDisposed || isComposing() || !m_aEnabledProvider())
     {
         hideGhost();
+        return;
+    }
+
+    // One request at a time. Remember that this fire was suppressed: the timer
+    // is one-shot and only keyReleased re-arms it, so a user who stops typing
+    // while a request is in flight would otherwise never get a request for the
+    // text they just finished -- and the in-flight reply is discarded as stale
+    // because every keyPressed bumps the generation.
+    if (m_bInFlight)
+    {
+        m_bRequestPending = true;
         return;
     }
 
@@ -311,6 +323,14 @@ void InlineCompletionController::requestNow()
 void InlineCompletionController::onResult(sal_uInt64 nGeneration, const FetchResult& rResult)
 {
     m_bInFlight = false;
+
+    // Re-arm for text typed while this request was in flight. Done first, so it
+    // happens on every path below -- most of which drop the result.
+    if (m_bRequestPending)
+    {
+        m_bRequestPending = false;
+        m_aTimer.Start();
+    }
 
     if (rResult.nStatus != 200)
     {
