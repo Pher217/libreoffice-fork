@@ -210,6 +210,23 @@ sal_Bool SAL_CALL InlineCompletionController::keyPressed(const css::awt::KeyEven
     {
         if (nCode == css::awt::Key::TAB && nMods == 0)
         {
+            // The document can change under a shown ghost with no key event at
+            // all -- a sidebar applyEdit, an agent UNO edit, a dialog's
+            // replace-all -- and the caret pixel rect the tracking timer
+            // watches need not move. Inserting then splices a suggestion
+            // written for different text into the document.
+            //
+            // Consume the key rather than returning false: letting Writer
+            // insert a literal tab at the caret would be an unintended edit
+            // made at the exact moment the user tried to accept a suggestion,
+            // which is the class of surprise this check exists to prevent.
+            if (!stillValid(m_aRequested, m_aDoc.getCursorContext()))
+            {
+                hideGhost();
+                ++m_nGeneration;
+                return true;
+            }
+
             OUString sText = m_sSuggestion;
             hideGhost();
             m_aDoc.insertAtCursor(sText);
