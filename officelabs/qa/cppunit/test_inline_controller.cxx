@@ -188,6 +188,54 @@ private:
     }
 
     // 3. keyPressed(Tab) with no suggestion returns false and text unchanged.
+    // GIVEN a shown suggestion WHEN the document changes underneath it with no
+    // key event at all -- a sidebar applyEdit, an agent UNO edit, a dialog's
+    // replace-all -- THEN Tab does not insert the now-stale suggestion.
+    //
+    // The caret provider here is constant, so the tracking timer cannot hide
+    // the ghost first: this isolates the Tab-time check itself.
+    void testTabDoesNotInsertAStaleSuggestion()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        officelabs::InlineCompletionController::FetchResult aResponse;
+        aResponse.nStatus = 200;
+        aResponse.aBody = R"({"suggestions":[{"text":" jumps"}]})";
+        officelabs::InlineCompletionController::Fetcher aFetcher =
+            [aResponse](const OString& /*rBody*/) mutable { return aResponse; };
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        vcl::Window* pEditWin = getEditWindow();
+        rtl::Reference<officelabs::InlineCompletionController> xController(
+            new officelabs::InlineCompletionController(
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin), makeEnabledProvider()));
+        xController->start();
+
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+        CPPUNIT_ASSERT(xController->isGhostVisible());
+
+        // Nobody typed; the document changed anyway.
+        Reference<text::XText> xText = xTextDoc->getText();
+        xText->setString(u"The quick brown fox runs"_ustr);
+        Reference<text::XTextViewCursorSupplier> xViewCursorSupplier(
+            xModel->getCurrentController(), UNO_QUERY_THROW);
+        xViewCursorSupplier->getViewCursor()->gotoEnd(false);
+
+        css::awt::KeyEvent aTab = makeKeyEvent(pEditWin, css::awt::Key::TAB);
+        sal_Bool bHandled = xController->keyPressed(aTab);
+
+        // The keystroke is consumed, so Writer cannot insert a literal tab.
+        CPPUNIT_ASSERT(bHandled);
+        CPPUNIT_ASSERT_EQUAL(u"The quick brown fox runs"_ustr, xText->getString());
+        CPPUNIT_ASSERT(!xController->isGhostVisible());
+
+        xController->dispose();
+    }
+
     void testTabWithoutSuggestionDoesNothing()
     {
         loadFromURL(u"private:factory/swriter"_ustr);
@@ -810,6 +858,7 @@ private:
     CPPUNIT_TEST_SUITE(InlineCompletionControllerTest);
     CPPUNIT_TEST(testAcceptSuggestion);
     CPPUNIT_TEST(testTabAcceptsSuggestion);
+    CPPUNIT_TEST(testTabDoesNotInsertAStaleSuggestion);
     CPPUNIT_TEST(testTabWithoutSuggestionDoesNothing);
     CPPUNIT_TEST(testForeignSourceKeyIgnored);
     CPPUNIT_TEST(testStaleGenerationCleared);
