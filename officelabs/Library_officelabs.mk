@@ -6,6 +6,23 @@ $(eval $(call gb_Library_add_defs,officelabs,\
     -DOFFICELABS_DLLIMPLEMENTATION \
 ))
 
+# This tree is configured with ENABLE_SAL_LOG empty, which makes SAL_INFO and
+# SAL_WARN expand to nothing everywhere (include/sal/detail/log.h). That left
+# this module with no diagnostics at all in the configuration it actually ships
+# in -- every SAL_INFO("officelabs.cef", ...) was dead code, and a mac bug that
+# took three sessions to find was invisible because of it.
+#
+# Enable them for this module only. The tree-wide alternative, --enable-sal-log
+# in autogen.input, rebuilds everything and changes every module's logging.
+#
+# Note: SAL_LOG defaults to "+WARN" when unset (sal/osl/all/log.cxx), so this
+# does mean module WARN lines print to stderr in a shipped build. INFO stays off
+# unless SAL_LOG selects it, e.g. SAL_LOG="+INFO.officelabs.inline".
+$(eval $(call gb_Library_add_defs,officelabs,\
+    -DSAL_LOG_INFO \
+    -DSAL_LOG_WARN \
+))
+
 $(eval $(call gb_Library_set_include,officelabs,\
     -I$(SRCDIR)/officelabs/inc \
     $$(INCLUDE) \

@@ -252,6 +252,12 @@ certain functionality.
 @li @c filter.xslt - xslt import/export
 @li @c filter.graphic
 
+@section officelabs
+
+@li @c officelabs - the OfficeLabs module
+@li @c officelabs.cef - CEF sidebar lifecycle and the cefQuery bridge
+@li @c officelabs.inline - inline completion: request, dismissal and ghost-window state
+
 @section oox
 
 @li @c oox
