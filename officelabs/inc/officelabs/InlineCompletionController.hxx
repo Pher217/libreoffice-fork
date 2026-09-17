@@ -116,6 +116,11 @@ private:
     DECL_LINK(WindowEventHdl, VclWindowEvent&, void);
     DECL_LINK(TimerHdl, Timer*, void);
     DECL_LINK(TrackTimerHdl, Timer*, void);
+    /// Re-anchors a typed-through ghost once Writer has inserted the key.
+    /// @p rExpected is the context keyPressed predicted for the document
+    /// after the insertion; reanchorAfterTypeThrough refuses to re-anchor
+    /// unless the document actually matches it.
+    void reanchorAfterTypeThrough(const OUString& rRemainder, const CursorContext& rExpected);
 
     css::uno::Reference<css::frame::XController> m_xController;
     css::uno::Reference<css::frame::XModel> m_xModel;
@@ -141,6 +146,12 @@ private:
     // text typed during the round trip never gets a request of its own.
     bool m_bRequestPending;
     bool m_bDisposed;
+    // Set while a type-through re-anchor callback is outstanding (posted but
+    // not yet run). A Tab pressed in this window must not accept the
+    // suggestion: m_aRequested still describes the pre-insertion document and
+    // the typed character may not be in the document yet, so stillValid()
+    // could wrongly pass.
+    bool m_bTypeThroughPending;
 
     int m_nFailures;
     sal_uInt64 m_nBackoffUntilMs;

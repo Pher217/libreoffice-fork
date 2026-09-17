@@ -12,6 +12,7 @@
 #include <officelabs/AgentIdentity.hxx>
 #include <officelabs/InlineCompletionEligibility.hxx>
 
+#include <com/sun/star/awt/KeyModifier.hpp>
 #include <com/sun/star/awt/XVclWindowPeer.hpp>
 #include <com/sun/star/beans/PropertyValue.hpp>
 #include <com/sun/star/frame/XController.hpp>
@@ -87,6 +88,7 @@ InlineCompletionController::InlineCompletionController(
     , m_bInFlight(false)
     , m_bRequestPending(false)
     , m_bDisposed(false)
+    , m_bTypeThroughPending(false)
     , m_nFailures(0)
     , m_nBackoffUntilMs(0)
 {
@@ -105,7 +107,14 @@ InlineCompletionController::InlineCompletionController(
     if (!m_aFontProvider)
         m_aFontProvider = [this]() { return cursorDocFont(); };
 
-    m_aTimer.SetTimeout(400); // ms
+    // 150 ms, not 400. Measured end-to-end inference is ~0.5 s median, so a
+    // 400 ms debounce was over 40% of the delay before anything appeared.
+    // A short debounce is affordable now that a matching keystroke types
+    // through the ghost instead of dismissing it: the common case while
+    // typing is no longer "dismiss and re-fetch", so the extra fires this
+    // allows are mostly suppressed by the in-flight guard rather than
+    // becoming requests.
+    m_aTimer.SetTimeout(150); // ms
     m_aTimer.SetInvokeHandler(LINK(this, InlineCompletionController, TimerHdl));
 
     m_aTrackTimer.SetTimeout(100); // ms
@@ -217,11 +226,16 @@ sal_Bool SAL_CALL InlineCompletionController::keyPressed(const css::awt::KeyEven
             // watches need not move. Inserting then splices a suggestion
             // written for different text into the document.
             //
+            // A type-through re-anchor posted but not yet run is the same
+            // class of problem: m_aRequested still describes the
+            // pre-insertion document and the typed character may not even be
+            // in the document yet, so stillValid() could wrongly agree.
+            //
             // Consume the key rather than returning false: letting Writer
             // insert a literal tab at the caret would be an unintended edit
             // made at the exact moment the user tried to accept a suggestion,
             // which is the class of surprise this check exists to prevent.
-            if (!stillValid(m_aRequested, m_aDoc.getCursorContext()))
+            if (m_bTypeThroughPending || !stillValid(m_aRequested, m_aDoc.getCursorContext()))
             {
                 hideGhost();
                 ++m_nGeneration;
@@ -242,6 +256,49 @@ sal_Bool SAL_CALL InlineCompletionController::keyPressed(const css::awt::KeyEven
             m_oDismissed = m_aDoc.getCursorContext();
             return true;
         }
+
+        // Type-through. A printable character that matches the head of the
+        // suggestion keeps the ghost and consumes one character from it,
+        // instead of dismissing and re-fetching. This is what makes the
+        // suggestion feel like it is being typed into rather than flickering:
+        // the user types along it and the remainder shrinks from the left.
+        //
+        // The key is NOT consumed -- Writer must insert it as normal. The
+        // ghost is re-anchored afterwards from a posted user event, because
+        // at this point the document and the caret have not moved yet.
+        // KeyModifier::SHIFT is set for every uppercase letter and shifted
+        // symbol (see toolkit's createKeyEvent), so it must stay allowed here
+        // or capitals never type through; MOD1/MOD2/MOD3 (Ctrl/Alt/Meta) are
+        // still excluded since those are shortcuts, not typed text.
+        const sal_Unicode cTyped = static_cast<sal_Unicode>(e.KeyChar);
+        const bool bOnlyShiftOrNoMods
+            = (nMods & ~css::awt::KeyModifier::SHIFT) == 0;
+        if (bOnlyShiftOrNoMods && cTyped >= 0x20 && !m_sSuggestion.isEmpty()
+            && m_sSuggestion[0] == cTyped)
+        {
+            const OUString sRemainder = m_sSuggestion.copy(1);
+            SAL_INFO("officelabs.inline",
+                     "type-through: consumed '" << OUString(cTyped)
+                     << "', " << sRemainder.getLength() << " left");
+
+            // The document has not been touched by this key yet -- Writer may
+            // buffer it behind a pending-input timer, or run autocorrect on
+            // it synchronously before the callback below runs. Predict the
+            // context the insertion should produce and let
+            // reanchorAfterTypeThrough refuse to re-anchor if the document
+            // does not actually match it once the callback runs.
+            CursorContext aExpected = m_aDoc.getCursorContext();
+            aExpected.textBefore += OUString(cTyped);
+
+            m_bTypeThroughPending = true;
+            auto* pFn = new std::function<void()>(
+                [pShared = m_pShared, sRemainder, aExpected]() {
+                    if (pShared->pOwner)
+                        pShared->pOwner->reanchorAfterTypeThrough(sRemainder, aExpected);
+                });
+            Application::PostUserEvent(LINK_NONMEMBER(pFn, runOnVclThread));
+            return false;
+        }
     }
 
     // Escape before a pending suggestion arrived dismisses it just the same.
@@ -258,6 +315,14 @@ sal_Bool SAL_CALL InlineCompletionController::keyPressed(const css::awt::KeyEven
 sal_Bool SAL_CALL InlineCompletionController::keyReleased(const css::awt::KeyEvent& e)
 {
     if (m_bDisposed || !isFromEditWindow(e.Source) || isComposing())
+        return false;
+
+    // A ghost still on screen here means the key was typed through it and the
+    // remainder still applies. Re-arming the debounce would fetch a competing
+    // suggestion and swap the one the user is typing along, which is the
+    // flicker this behaviour exists to remove. The next miss dismisses the
+    // ghost and restarts the debounce as usual.
+    if (m_pGhost && m_pGhost->isShowing())
         return false;
 
     m_aTimer.Start();
@@ -376,6 +441,69 @@ void InlineCompletionController::onResult(sal_uInt64 nGeneration, const FetchRes
     m_aTrackTimer.Start();
 }
 
+void InlineCompletionController::reanchorAfterTypeThrough(const OUString& rRemainder,
+                                                           const CursorContext& rExpected)
+{
+    m_bTypeThroughPending = false;
+
+    if (m_bDisposed || !m_pGhost || !m_pGhost->isShowing())
+        return;
+
+    // Guard: confirm the typed character actually landed where keyPressed
+    // predicted before touching anything else. Writer buffers typed input
+    // behind a pending-input flush timer, and autocorrect can rewrite text
+    // before the caret synchronously -- either way the remainder computed in
+    // keyPressed no longer corresponds to the document, and re-anchoring
+    // against it would show or accept the wrong text.
+    //
+    // Trade-off: during fast typing this guard usually fails, so the ghost is
+    // dismissed and re-fetched after the debounce instead of following the
+    // typing. That is deliberate -- it is strictly better than re-anchoring
+    // against a stale document, which the tracking timer would dismiss within
+    // 100 ms anyway (a flicker). Type-through still works at normal typing
+    // speed, where Writer flushes synchronously.
+    const CursorContext aCurrent = m_aDoc.getCursorContext();
+    if (rExpected.textBefore != aCurrent.textBefore || rExpected.textAfter != aCurrent.textAfter)
+    {
+        hideGhost();
+        m_aTimer.Start();
+        return;
+    }
+
+    // The whole suggestion has now been typed out by hand: nothing is left to
+    // offer, so drop it and let the normal debounce ask for the next one.
+    if (rRemainder.isEmpty())
+    {
+        hideGhost();
+        m_aTimer.Start();
+        return;
+    }
+
+    auto aRect = m_aCaretProvider();
+    if (!aRect)
+    {
+        hideGhost();
+        m_aTimer.Start();
+        return;
+    }
+
+    // Re-anchor against the document as it now is, so the suggestion the user
+    // is typing along stays the one Tab would accept and stillValid keeps
+    // agreeing with it.
+    m_aRequested = aCurrent;
+    m_sSuggestion = rRemainder;
+
+    if (!m_pGhost->showAt(*aRect, rRemainder, m_aFontProvider()))
+    {
+        hideGhost();
+        m_aTimer.Start();
+        return;
+    }
+
+    m_aShownRect = aRect;
+    m_aTrackTimer.Start();
+}
+
 void InlineCompletionController::hideGhost()
 {
     if (m_pGhost)
@@ -483,6 +611,7 @@ IMPL_LINK_NOARG(InlineCompletionController, TrackTimerHdl, Timer*, void)
         {
             hideGhost();
             ++m_nGeneration;
+            m_aTimer.Start();
         }
         else
         {
