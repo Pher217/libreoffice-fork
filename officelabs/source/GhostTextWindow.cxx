@@ -63,13 +63,21 @@ bool GhostTextWindow::showAt(const tools::Rectangle& rCaretPixel, const OUString
     if (nWidth > nMaxWidth)
         nWidth = nMaxWidth;
 
-    // A document font can be taller than the caret (tight line spacing, large
-    // sizes). Grow the window around the caret's vertical centre so the text
-    // is not clipped; Paint centres the text, which lines up with the
-    // document text at normal sizes.
-    const tools::Long nCaretHeight = rCaretPixel.GetHeight();
-    const tools::Long nHeight = std::max(nCaretHeight, GetTextHeight());
-    const tools::Long nY = std::max<tools::Long>(0, rCaretPixel.Top() - (nHeight - nCaretHeight) / 2);
+    // Anchor to the caret rect's own top, which for ordinary text is the
+    // document line's ascent-top: SwVisibleCursor::SetPos builds the caret
+    // rect from the line's char rect. Size the window to exactly this font's
+    // text height -- the same ascent+descent Paint measures off the same font
+    // -- so Paint's centring term is always zero and the ghost baseline lands
+    // at (window top + this font's ascent), i.e. the document baseline.
+    //
+    // The previous code grew the window around the caret's vertical CENTRE,
+    // which only coincides with the line top when the two heights are equal.
+    // Caret height is a Writer layout quantity with no relation to the ghost
+    // font's metrics, so the text drifted off the baseline by half their
+    // difference -- and centring in Paint misplaces it again, since a real
+    // typeface's ascent is nearer 80% of its height than 50%.
+    const tools::Long nHeight = GetTextHeight();
+    const tools::Long nY = rCaretPixel.Top();
 
     SetPosSizePixel(Point(nX, nY), Size(nWidth, nHeight));
     Show(true, ShowFlags::NoActivate | ShowFlags::NoFocusChange);

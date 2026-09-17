@@ -905,8 +905,10 @@ private:
     }
 
     // 20. GIVEN a 40 px document font and a 16 px caret WHEN a suggestion is
-    // shown THEN the ghost window is as tall as the text, so nothing is clipped.
-    void testTallFontGrowsGhostWindow()
+    // shown THEN the ghost window height is exactly the text height, so
+    // Paint's centring term is zero and the ghost sits on the document
+    // baseline (project#194).
+    void testGhostWindowHeightIsTextHeight()
     {
         loadFromURL(u"private:factory/swriter"_ustr);
         Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
@@ -943,7 +945,7 @@ private:
     CPPUNIT_TEST(testFontProviderAppliesDocFont);
     CPPUNIT_TEST(testDefaultFontProviderUsesCursorHeight);
     CPPUNIT_TEST(testNoDocFontFallsBackToAppFont);
-    CPPUNIT_TEST(testTallFontGrowsGhostWindow);
+    CPPUNIT_TEST(testGhostWindowHeightIsTextHeight);
     CPPUNIT_TEST_SUITE_END();
 };
 

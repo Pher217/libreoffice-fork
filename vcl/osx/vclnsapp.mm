@@ -102,6 +102,31 @@
         NSWindow* pKeyWin = [NSApp keyWindow];
         if( pKeyWin && [pKeyWin isKindOfClass: [SalFrameWindow class]] )
         {
+            // A foreign, non-VCL NSView embedded inside this frame -- the
+            // OfficeLabs CEF sidebar shares the frame's NSWindow rather than
+            // owning one (officelabs/source/WebViewPanelHostMac.mm) -- must
+            // get its own Command-key equivalents. The dispatch below is
+            // written for VCL's own constructs: it sends the event to the
+            // main menu, or force-dispatches it to [pKeyWin contentView],
+            // which is always the SalFrameView. Either way an embedded view
+            // never sees Cmd-V/C/X/A, so the sidebar's text field could not
+            // be pasted into at all.
+            //
+            // Only step aside for a view that is genuinely embedded: an
+            // NSView, below this frame's content view, that is not the
+            // SalFrameView itself. Testing "not a SalFrameView" alone would
+            // also catch the NSWindow being its own first responder, which
+            // is the ordinary no-focus case, and would break every menu
+            // shortcut.
+            NSResponder* pResponder = [pKeyWin firstResponder];
+            if( [pResponder isKindOfClass: [NSView class]]
+                && ! [pResponder isKindOfClass: [SalFrameView class]]
+                && [static_cast<NSView*>(pResponder) isDescendantOf: [pKeyWin contentView]] )
+            {
+                [super sendEvent: pEvent];
+                return;
+            }
+
             // Commit uncommitted text before dispatching key shortcuts. In
             // certain cases such as pressing Command-Option-C in a Writer
             // document while there is uncommitted text will call
