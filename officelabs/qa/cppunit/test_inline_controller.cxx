@@ -19,6 +19,7 @@
 
 #include <com/sun/star/awt/Key.hpp>
 #include <com/sun/star/awt/KeyEvent.hpp>
+#include <com/sun/star/awt/KeyModifier.hpp>
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/frame/XController.hpp>
 #include <com/sun/star/frame/XModel.hpp>
@@ -922,6 +923,221 @@ private:
         xController->dispose();
     }
 
+    // 21. GIVEN a shown suggestion " jumps" WHEN the leading space (matching
+    // the head of the suggestion) is typed THEN the ghost stays showing and
+    // the pending suggestion shortens by that one character.
+    void testMatchingLowercaseTypesThrough()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        rtl::Reference<officelabs::InlineCompletionController> xController = showWithFontProvider({});
+        vcl::Window* pEditWin = getEditWindow();
+
+        CPPUNIT_ASSERT_EQUAL(u" jumps"_ustr, xController->pendingSuggestion());
+
+        css::awt::KeyEvent aKey = makeKeyEvent(pEditWin, css::awt::Key::SPACE);
+        aKey.KeyChar = u' ';
+        sal_Bool bHandled = xController->keyPressed(aKey);
+        // Not consumed: Writer must insert the character itself. keyPressed
+        // only posts the re-anchor callback, so simulate Writer's own
+        // insertion of the typed key before draining it.
+        CPPUNIT_ASSERT(!bHandled);
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        Reference<text::XTextViewCursorSupplier> xViewCursorSupplier(
+            xModel->getCurrentController(), UNO_QUERY_THROW);
+        Reference<text::XTextViewCursor> xViewCursor = xViewCursorSupplier->getViewCursor();
+        xViewCursor->getText()->insertString(xViewCursor->getEnd(), u" "_ustr, false);
+
+        Scheduler::ProcessEventsToIdle();
+
+        CPPUNIT_ASSERT(xController->isGhostVisible());
+        CPPUNIT_ASSERT_EQUAL(u"jumps"_ustr, xController->pendingSuggestion());
+
+        xController->dispose();
+    }
+
+    // 22. GIVEN a shown suggestion starting with an uppercase letter WHEN that
+    // letter is typed with the Shift modifier THEN it still types through
+    // rather than being treated as a shortcut and dismissing the ghost.
+    void testShiftedMatchingCharacterTypesThrough()
+    {
+        officelabs::InlineCompletionController::Fetcher aFetcher = [](const OString& /*rBody*/) {
+            return officelabs::InlineCompletionController::FetchResult{
+                200, R"({"suggestions":[{"text":"Jumps"}]})"};
+        };
+
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        vcl::Window* pEditWin = getEditWindow();
+        rtl::Reference<officelabs::InlineCompletionController> xController(
+            new officelabs::InlineCompletionController(
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin), makeEnabledProvider()));
+        xController->start();
+
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+        CPPUNIT_ASSERT(xController->isGhostVisible());
+        CPPUNIT_ASSERT_EQUAL(u"Jumps"_ustr, xController->pendingSuggestion());
+
+        css::awt::KeyEvent aKey
+            = makeKeyEvent(pEditWin, css::awt::Key::J, css::awt::KeyModifier::SHIFT);
+        aKey.KeyChar = u'J';
+        sal_Bool bHandled = xController->keyPressed(aKey);
+        CPPUNIT_ASSERT(!bHandled);
+
+        // keyPressed only posts the re-anchor callback; simulate Writer's own
+        // insertion of the typed key before draining it.
+        Reference<text::XTextViewCursorSupplier> xViewCursorSupplier(
+            xModel->getCurrentController(), UNO_QUERY_THROW);
+        Reference<text::XTextViewCursor> xViewCursor = xViewCursorSupplier->getViewCursor();
+        xViewCursor->getText()->insertString(xViewCursor->getEnd(), u"J"_ustr, false);
+
+        Scheduler::ProcessEventsToIdle();
+
+        CPPUNIT_ASSERT(xController->isGhostVisible());
+        CPPUNIT_ASSERT_EQUAL(u"umps"_ustr, xController->pendingSuggestion());
+
+        xController->dispose();
+    }
+
+    // 23. GIVEN a shown suggestion " jumps" WHEN a non-matching character is
+    // typed THEN the ghost is dismissed rather than typed through.
+    void testNonMatchingCharacterDismissesGhost()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        rtl::Reference<officelabs::InlineCompletionController> xController = showWithFontProvider({});
+        vcl::Window* pEditWin = getEditWindow();
+
+        CPPUNIT_ASSERT_EQUAL(u" jumps"_ustr, xController->pendingSuggestion());
+
+        css::awt::KeyEvent aKey = makeKeyEvent(pEditWin, css::awt::Key::Z);
+        aKey.KeyChar = u'z';
+        sal_Bool bHandled = xController->keyPressed(aKey);
+        CPPUNIT_ASSERT(!bHandled);
+
+        CPPUNIT_ASSERT(!xController->isGhostVisible());
+        CPPUNIT_ASSERT(xController->pendingSuggestion().isEmpty());
+
+        xController->dispose();
+    }
+
+    // 24. GIVEN a type-through callback posted but not yet run WHEN Tab is
+    // pressed before it runs THEN the key is consumed, nothing is inserted
+    // into the document, and the ghost is dismissed.
+    void testTabWhileTypeThroughPendingDoesNotInsert()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        officelabs::InlineCompletionController::Fetcher aFetcher = [](const OString& /*rBody*/) {
+            return officelabs::InlineCompletionController::FetchResult{
+                200, R"({"suggestions":[{"text":" jumps"}]})"};
+        };
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        vcl::Window* pEditWin = getEditWindow();
+        rtl::Reference<officelabs::InlineCompletionController> xController(
+            new officelabs::InlineCompletionController(
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin), makeEnabledProvider()));
+        xController->start();
+
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+        CPPUNIT_ASSERT(xController->isGhostVisible());
+
+        // Type through the leading space, but do NOT drain the event loop, so
+        // the posted reanchorAfterTypeThrough callback stays outstanding.
+        css::awt::KeyEvent aSpace = makeKeyEvent(pEditWin, css::awt::Key::SPACE);
+        aSpace.KeyChar = u' ';
+        CPPUNIT_ASSERT(!xController->keyPressed(aSpace));
+
+        css::awt::KeyEvent aTab = makeKeyEvent(pEditWin, css::awt::Key::TAB);
+        sal_Bool bHandled = xController->keyPressed(aTab);
+        CPPUNIT_ASSERT(bHandled);
+
+        Reference<text::XText> xText = xTextDoc->getText();
+        CPPUNIT_ASSERT_EQUAL(u"The quick brown fox"_ustr, xText->getString());
+        CPPUNIT_ASSERT(!xController->isGhostVisible());
+
+        xController->dispose();
+    }
+
+    // 25. GIVEN a type-through callback posted WHEN the document does not
+    // contain the expected insertion by the time it runs (the typed character
+    // was buffered rather than inserted, or autocorrect rewrote the text)
+    // THEN the ghost is hidden and the debounce timer is left running rather
+    // than dead -- observed here as a second fetch happening on its own,
+    // with no further key event.
+    void testTypeThroughGuardFailureHidesGhostAndRearmsDebounce()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        std::atomic<int> nCalls{ 0 };
+        officelabs::InlineCompletionController::Fetcher aFetcher =
+            [&nCalls](const OString& /*rBody*/) {
+                ++nCalls;
+                return officelabs::InlineCompletionController::FetchResult{
+                    200, R"({"suggestions":[{"text":" jumps"}]})"};
+            };
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        vcl::Window* pEditWin = getEditWindow();
+        rtl::Reference<officelabs::InlineCompletionController> xController(
+            new officelabs::InlineCompletionController(
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin), makeEnabledProvider()));
+        xController->start();
+
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+        CPPUNIT_ASSERT(xController->isGhostVisible());
+        CPPUNIT_ASSERT_EQUAL(1, nCalls.load());
+
+        // Type through the leading space, but let the document diverge from
+        // what keyPressed predicted before the posted callback runs -- as
+        // Writer's own input buffering or autocorrect would.
+        css::awt::KeyEvent aSpace = makeKeyEvent(pEditWin, css::awt::Key::SPACE);
+        aSpace.KeyChar = u' ';
+        CPPUNIT_ASSERT(!xController->keyPressed(aSpace));
+
+        Reference<text::XTextViewCursorSupplier> xViewCursorSupplier(
+            xModel->getCurrentController(), UNO_QUERY_THROW);
+        Reference<text::XTextViewCursor> xViewCursor = xViewCursorSupplier->getViewCursor();
+        xViewCursor->getText()->insertString(xViewCursor->getEnd(), u"!"_ustr, false);
+
+        Scheduler::ProcessEventsToIdle();
+
+        CPPUNIT_ASSERT(!xController->isGhostVisible());
+        CPPUNIT_ASSERT(xController->pendingSuggestion().isEmpty());
+
+        // No further key event: the 150ms debounce alone must issue the next
+        // request, which it can only do if it was re-armed.
+        bool bSecondCall = false;
+        for (int i = 0; i < 100 && !bSecondCall; ++i)
+        {
+            Scheduler::ProcessEventsToIdle();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            bSecondCall = nCalls.load() == 2;
+        }
+        CPPUNIT_ASSERT_EQUAL(2, nCalls.load());
+
+        xController->dispose();
+    }
+
     CPPUNIT_TEST_SUITE(InlineCompletionControllerTest);
     CPPUNIT_TEST(testAcceptSuggestion);
     CPPUNIT_TEST(testTabAcceptsSuggestion);
@@ -946,6 +1162,11 @@ private:
     CPPUNIT_TEST(testDefaultFontProviderUsesCursorHeight);
     CPPUNIT_TEST(testNoDocFontFallsBackToAppFont);
     CPPUNIT_TEST(testGhostWindowHeightIsTextHeight);
+    CPPUNIT_TEST(testMatchingLowercaseTypesThrough);
+    CPPUNIT_TEST(testShiftedMatchingCharacterTypesThrough);
+    CPPUNIT_TEST(testNonMatchingCharacterDismissesGhost);
+    CPPUNIT_TEST(testTabWhileTypeThroughPendingDoesNotInsert);
+    CPPUNIT_TEST(testTypeThroughGuardFailureHidesGhostAndRearmsDebounce);
     CPPUNIT_TEST_SUITE_END();
 };
 
