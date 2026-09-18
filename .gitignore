@@ -38,6 +38,7 @@
 /autogen.input
 /autogen.lastrun
 /autogen.lastrun.bak
+/autogen.lastrun.*
 /ChangeLog
 /config.Build.log
 /config.Build.warn
