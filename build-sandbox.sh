@@ -110,8 +110,11 @@ fi
 
 git -C "$SANDBOX" restore --source="$BRANCH" --worktree -- "${PATHS[@]}"
 echo "synced. building..."
+# BUILD_CMD is a testability seam: the test suite sets it to `true` so the sync
+# and guard logic can be exercised without a multi-hour LibreOffice build.
+BUILD_CMD="${BUILD_CMD:-gmake}"
 # shellcheck disable=SC2086
-( cd "$SANDBOX" && gmake $MAKE_ARGS )
+( cd "$SANDBOX" && $BUILD_CMD $MAKE_ARGS )
 echo
 echo "built from $BRANCH. The sandbox still carries that content --"
 echo "run './build-sandbox.sh --restore' when you are done with it."
