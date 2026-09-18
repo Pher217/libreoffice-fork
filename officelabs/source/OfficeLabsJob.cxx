@@ -28,6 +28,7 @@
 #include <cppuhelper/supportsservice.hxx>
 #include <cppuhelper/weak.hxx>
 #include <vcl/svapp.hxx>
+#include <vcl/threadex.hxx>
 
 #include <utility>
 
@@ -84,12 +85,10 @@ OfficeLabsJob::execute(const css::uno::Sequence<css::beans::NamedValue>& rArgume
     }
 
     // Dispatch on Operation. This is the seam for project#216's atomic
-    // compare-and-undo: that operation must take a single SolarMutexGuard
-    // for the whole check-and-act sequence, not one guard per step. Separate
-    // UNO round trips (one call to check, another to act) cannot close the
-    // window between the two -- the document can change on the VCL thread
-    // in between -- which is the entire reason this exists as one execute()
-    // call instead of two.
+    // compare-and-undo: separate UNO round trips (one call to check, another
+    // to act) cannot close the window between the two -- the document can
+    // change on the VCL thread in between -- which is the entire reason that
+    // operation exists as one execute() call instead of two.
     if (sOperation == "ping")
         return css::uno::Any(u"ok"_ustr);
 
@@ -101,12 +100,142 @@ OfficeLabsJob::execute(const css::uno::Sequence<css::beans::NamedValue>& rArgume
         getXWeak(), 0);
 }
 
+// The three values undo_agent_top reports back. A struct rather than three
+// out-params because it crosses a thread boundary below, and syncExecute
+// copy-constructs the functor into free store -- a single returned value is
+// the only shape that is obviously safe there.
+struct UndoAgentTopOutcome
+{
+    sal_Int32 nUndone = 0;
+    bool bRefused = false;
+    OUString sReason;
+};
+
+// The check-and-act itself. Runs ON THE MAIN (solar) THREAD -- see
+// executeUndoAgentTop for why that is not optional.
+UndoAgentTopOutcome doUndoAgentTop(const css::uno::Reference<css::document::XUndoManager>& xUndoManager,
+                                   const OUString& rContextTitle, sal_Int32 nMaxSteps)
+{
+    SolarMutexGuard aGuard;
+
+    UndoAgentTopOutcome aOut;
+
+    while (aOut.nUndone < nMaxSteps)
+    {
+        if (!xUndoManager->isUndoPossible())
+        {
+            // isUndoPossible() is documented to be false in TWO different
+            // situations -- "the undo stack is currently empty, OR there is an
+            // open and not-yet-closed undo context"
+            // (offapi/com/sun/star/document/XUndoManager.idl:213-219). Those
+            // are not the same answer to give a caller: an empty stack means
+            // there is nothing of yours left, an open context means someone is
+            // mid-edit and the same call would succeed later. Reporting both as
+            // a silent Undone=0 success told the agent it had undone everything
+            // it had when it had undone nothing.
+            //
+            // getAllUndoActionTitles() does not consult IsInListAction() --
+            // lcl_getAllActionTitles() reads GetUndoActionCount(TopLevel)
+            // directly (framework/source/fwe/helper/undomanagerhelper.cxx:990),
+            // whereas isUndoPossible() returns false outright when
+            // IsInListAction() (ibid.:949). So a non-empty stack here can only
+            // mean an open context, and that is the discriminator.
+            if (xUndoManager->getAllUndoActionTitles().hasElements())
+            {
+                aOut.bRefused = true;
+                aOut.sReason = "an undo context is open on this document; nothing can be "
+                               "undone until it is closed";
+            }
+            break;
+        }
+
+        const OUString sTitle = xUndoManager->getCurrentUndoActionTitle();
+        if (sTitle != rContextTitle)
+        {
+            // Only the very first entry not matching is a refusal. Once we
+            // have undone at least one of ours, running into someone else's
+            // entry is just the natural end of our run, not an error.
+            if (aOut.nUndone == 0)
+            {
+                aOut.bRefused = true;
+                aOut.sReason = "top undo entry \"" + sTitle + "\" does not match ContextTitle \""
+                               + rContextTitle + "\"";
+            }
+            break;
+        }
+
+        try
+        {
+            xUndoManager->undo();
+        }
+        catch (const css::uno::Exception& rEx)
+        {
+            // Letting this propagate would replace the count with an exception,
+            // and the count is the part the caller cannot reconstruct: after a
+            // throw on step 3 of 5 the document has moved and the agent has no
+            // way to learn how far. Report the partial count and the reason
+            // instead -- a half-done undo the caller knows about beats a
+            // half-done undo it does not.
+            aOut.bRefused = true;
+            aOut.sReason = "undo failed after " + OUString::number(aOut.nUndone) + " step(s): "
+                           + rEx.Message;
+            break;
+        }
+        ++aOut.nUndone;
+    }
+
+    return aOut;
+}
+
 // Undoes entries at the top of the agent's undo stack that belong to a named
-// undo context, in a single execute() call. DocumentUndoManager::undo() takes
-// its own UndoManagerGuard per call (sfx2/source/doc/docundomanager.cxx), so
-// two separate UNO round trips -- read the top title, then undo -- leave a
-// window on the VCL thread in which the stack can change between them. One
-// SolarMutexGuard held for the whole check-and-act loop closes that window.
+// undo context, in a single execute() call. Two separate UNO round trips --
+// read the top title, then undo -- leave a window on the VCL thread in which
+// the stack can change between them; one call closes that window.
+//
+// WHY THIS HOPS TO THE MAIN THREAD
+// The call always arrives over URP, on a thread that is not the solar thread.
+// Undo is not a data-structure operation: reverting a Writer action runs view
+// code -- invalidation, cursor and selection movement, scrolling -- which ends
+// in VCL and, on macOS, in AppKit. AppKit off the main thread is undefined,
+// which is why framework marshals its own dispatches the same way when a
+// caller asks for it (framework/source/services/dispatchhelper.cxx:115-119,
+// frame.cxx:579-590, both keyed on the OnMainThread descriptor property).
+// Holding the SolarMutex from a foreign thread is necessary for that work but
+// it is not sufficient, and this component had only the mutex.
+//
+// Second, the undo helper documents a precondition the mutex-only version
+// cannot honour. impl_doUndoRedo() opens with
+//
+//     ::osl::Guard< ::framework::IMutex > aExternalGuard( i_externalLock.getGuardedMutex() );
+//         // note that this assumes that the mutex has been released in the
+//         // thread which added the Undo/Redo request, so we can successfully
+//         // acquire it
+//
+// (framework/source/fwe/helper/undomanagerhelper.cxx:622-626). undo() does not
+// run the work inline: impl_processRequest() queues it, calls
+// i_instanceLock.clear() -- which drops DocumentUndoManager's own
+// UndoManagerGuard but not an outer guard of ours, the SolarMutex being
+// recursive -- and, if another thread is already draining the queue, blocks in
+// pRequest->wait() (ibid.:479) with our guard still held. The draining thread
+// then wants the mutex we are sitting on.
+//
+// Be precise about that second one: it needs contention to bite. With no other
+// thread in the queue we drain it ourselves and the recursive mutex makes it
+// work, which is why every main-thread cppunit test below passes either way.
+// Running on the solar thread does not make the contended case impossible --
+// the main thread can wait on the queue holding the mutex too. What it does is
+// stop us being a special case: the sequence now executes in exactly the
+// position Edit > Undo executes in, so it inherits whatever guarantees ship
+// with that path instead of resting on an untested assumption about a foreign
+// thread's recursive lock.
+//
+// SolarThreadExecutor::execute() posts a user event and takes a
+// SolarMutexReleaser while it waits (vcl/source/helper/threadex.cxx:55-64), so
+// the calling thread holds nothing meanwhile. The releaser is safe to
+// construct from a thread that owns nothing -- it is conditional on
+// GetSolarMutex().IsCurrentThread() (include/vcl/svapp.hxx:1438-1442) -- so no
+// outer guard is needed here, and taking one would only add a contention
+// window before it was released again.
 css::uno::Any
 OfficeLabsJob::executeUndoAgentTop(const css::uno::Sequence<css::beans::NamedValue>& rArguments)
 {
@@ -131,57 +260,32 @@ OfficeLabsJob::executeUndoAgentTop(const css::uno::Sequence<css::beans::NamedVal
     if (sContextTitle.isEmpty())
         throw css::lang::IllegalArgumentException(
             "OfficeLabsJob: undo_agent_top requires a non-empty ContextTitle", getXWeak(), 0);
-    // Reject rather than default. MaxSteps left at 0 makes the loop below a
-    // silent no-op -- the caller asks to undo and nothing happens, with a
-    // success result. A dispatcher whose failure mode is "quietly did nothing"
-    // is the thing this design set out not to be.
+    // Reject rather than default. MaxSteps left at 0 makes the loop a silent
+    // no-op -- the caller asks to undo and nothing happens, with a success
+    // result. A dispatcher whose failure mode is "quietly did nothing" is the
+    // thing this design set out not to be.
     if (nMaxSteps <= 0)
         throw css::lang::IllegalArgumentException(
             "OfficeLabsJob: undo_agent_top requires MaxSteps >= 1", getXWeak(), 0);
 
-    css::uno::Reference<css::document::XUndoManagerSupplier> xSupplier(xModel,
-                                                                        css::uno::UNO_QUERY);
+    css::uno::Reference<css::document::XUndoManagerSupplier> xSupplier(xModel, css::uno::UNO_QUERY);
     if (!xSupplier.is())
         throw css::lang::IllegalArgumentException(
             "OfficeLabsJob: Model does not support XUndoManagerSupplier", getXWeak(), 0);
     css::uno::Reference<css::document::XUndoManager> xUndoManager = xSupplier->getUndoManager();
 
-    SolarMutexGuard aGuard;
-
-    sal_Int32 nUndone = 0;
-    bool bRefused = false;
-    OUString sReason;
-
-    while (nUndone < nMaxSteps)
-    {
-        // isUndoPossible() is false for both an empty stack and an open undo
-        // context; either way there is nothing left here for us to undo.
-        if (!xUndoManager->isUndoPossible())
-            break;
-
-        const OUString sTitle = xUndoManager->getCurrentUndoActionTitle();
-        if (sTitle != sContextTitle)
-        {
-            // Only the very first entry not matching is a refusal. Once we
-            // have undone at least one of ours, running into someone else's
-            // entry is just the natural end of our run, not an error.
-            if (nUndone == 0)
-            {
-                bRefused = true;
-                sReason = "top undo entry \"" + sTitle + "\" does not match ContextTitle \""
-                          + sContextTitle + "\"";
-            }
-            break;
-        }
-
-        xUndoManager->undo();
-        ++nUndone;
-    }
+    // Capturing by reference is safe here, and only here, because syncExecute
+    // blocks until the functor has returned -- this frame outlives it. The
+    // warning in threadex.hxx is about the asynchronous shape.
+    const UndoAgentTopOutcome aOutcome = vcl::solarthread::syncExecute(
+        [&xUndoManager, &sContextTitle, nMaxSteps] {
+            return doUndoAgentTop(xUndoManager, sContextTitle, nMaxSteps);
+        });
 
     const css::uno::Sequence<css::beans::NamedValue> aResult{
-        { u"Undone"_ustr, css::uno::Any(nUndone) },
-        { u"Refused"_ustr, css::uno::Any(bRefused) },
-        { u"Reason"_ustr, css::uno::Any(sReason) },
+        { u"Undone"_ustr, css::uno::Any(aOutcome.nUndone) },
+        { u"Refused"_ustr, css::uno::Any(aOutcome.bRefused) },
+        { u"Reason"_ustr, css::uno::Any(aOutcome.sReason) },
     };
     return css::uno::Any(aResult);
 }
