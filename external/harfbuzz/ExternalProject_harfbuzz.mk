@@ -33,6 +33,8 @@ cross_cxx = $(call python_listify,$(gb_CXX))
 endif
 cross_ld := $(call python_listify,$(subst -fuse-ld=,,$(USE_LD)))
 
+harfbuzz_pkgconfig_sep := $(if $(filter WNT,$(OS)),;,$(LIBO_PATH_SEPARATOR))
+
 define gb_harfbuzz_cross_compile
 [binaries]
 c = [$(cross_c)]
@@ -56,7 +58,7 @@ $(call gb_ExternalProject_get_state_target,harfbuzz,build) : | $(call gb_Externa
 	$(file >$(gb_UnpackedTarball_workdir)/harfbuzz/cross-file.txt,$(gb_harfbuzz_cross_compile))
 	cp -f $(gb_UnpackedTarball_workdir)/graphite/graphite2-uninstalled.pc $(gb_UnpackedTarball_workdir)/graphite/graphite2.pc 2>/dev/null || true
 	$(call gb_ExternalProject_run,build,\
-		PKG_CONFIG_PATH="$${PKG_CONFIG_PATH:+$${PKG_CONFIG_PATH}$(LIBO_PATH_SEPARATOR)}$(gb_UnpackedTarball_workdir)/graphite$(if $(SYSTEM_ICU),,$(LIBO_PATH_SEPARATOR)$(gb_UnpackedTarball_workdir)/icu)" \
+		PKG_CONFIG_PATH="$${PKG_CONFIG_PATH:+$${PKG_CONFIG_PATH}$(harfbuzz_pkgconfig_sep)}$(gb_UnpackedTarball_workdir)/graphite$(if $(SYSTEM_ICU),,$(harfbuzz_pkgconfig_sep)$(gb_UnpackedTarball_workdir)/icu)" \
 		PYTHONWARNINGS= \
 		$(MESON) setup --wrap-mode nofallback builddir \
 			-Ddefault_library=static -Dbuildtype=$(if $(ENABLE_DBGUTIL),debug,$(if $(ENABLE_DEBUG),debugoptimized,release \
@@ -69,7 +71,7 @@ $(call gb_ExternalProject_get_state_target,harfbuzz,build) : | $(call gb_Externa
 			-Dicu_builtin=true \
 			-Dgraphite2=enabled \
 			$(if $(filter MSC_TRUE,$(COM)_$(MSVC_USE_DEBUG_RUNTIME)),-Db_vscrt=mdd) \
-			$(if $(filter-out $(BUILD_PLATFORM),$(HOST_PLATFORM))$(WSL),--cross-file cross-file.txt) && \
+			$(if $(filter-out $(BUILD_PLATFORM),$(HOST_PLATFORM))$(WSL)$(filter WNT,$(OS)),--cross-file cross-file.txt) && \
 		$(MESON) compile -C builddir libs \
 			$(if $(verbose),--verbose) \
 	)
