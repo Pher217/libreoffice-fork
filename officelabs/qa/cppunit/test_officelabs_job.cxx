@@ -15,6 +15,8 @@
 #include <cppunit/plugin/TestPlugIn.h>
 
 #include <com/sun/star/beans/NamedValue.hpp>
+#include <com/sun/star/document/UndoFailedException.hpp>
+#include <com/sun/star/document/XUndoAction.hpp>
 #include <com/sun/star/document/XUndoManager.hpp>
 #include <com/sun/star/document/XUndoManagerSupplier.hpp>
 #include <com/sun/star/frame/XModel.hpp>
@@ -23,6 +25,15 @@
 #include <com/sun/star/text/XText.hpp>
 #include <com/sun/star/text/XTextDocument.hpp>
 #include <com/sun/star/uno/XInterface.hpp>
+
+#include <cppuhelper/implbase.hxx>
+#include <vcl/svapp.hxx>
+
+#include <atomic>
+#include <chrono>
+#include <exception>
+#include <thread>
+#include <utility>
 
 using namespace css;
 using namespace css::uno;
@@ -52,6 +63,28 @@ UndoAgentTopResult toResult(const Sequence<beans::NamedValue>& rSeq)
     }
     return aResult;
 }
+
+/// An undo action that always fails, carrying the agent's context title so the
+/// walk accepts it and then trips over it. There is no way to make a real
+/// Writer undo fail on demand, and the partial-count path cannot be tested
+/// without one.
+class ThrowingUndoAction final : public cppu::WeakImplHelper<document::XUndoAction>
+{
+    OUString m_sTitle;
+
+public:
+    explicit ThrowingUndoAction(OUString sTitle)
+        : m_sTitle(std::move(sTitle))
+    {
+    }
+
+    OUString SAL_CALL getTitle() override { return m_sTitle; }
+    void SAL_CALL undo() override
+    {
+        throw document::UndoFailedException(u"this action always fails"_ustr, *this, Any());
+    }
+    void SAL_CALL redo() override {}
+};
 
 /// GIVEN/WHEN/THEN style tests for the OfficeLabsJob undo_agent_top operation.
 class OfficeLabsJobTest : public UnoApiTest
@@ -215,6 +248,136 @@ private:
         CPPUNIT_ASSERT_THROW(xJob->execute(aArgs), lang::IllegalArgumentException);
     }
 
+    // 7. GIVEN an undo context left open on the document, WHEN undo_agent_top
+    // runs, THEN it refuses and says why -- rather than reporting Undone=0 as
+    // a success, which is what isUndoPossible() alone would have produced.
+    void testOpenUndoContextIsRefusedNotReportedAsSuccess()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        Reference<text::XText> xText = xTextDoc->getText();
+
+        insertUnderAgentContext(xText, u"one"_ustr);
+
+        // Enter a context and deliberately do not leave it.
+        Reference<document::XUndoManager> xUndoManager = getUndoManager();
+        xUndoManager->enterUndoContext(u"someone else is mid-edit"_ustr);
+        xText->insertString(xText->getEnd(), u"two"_ustr, false);
+        CPPUNIT_ASSERT(!xUndoManager->isUndoPossible());
+
+        Reference<task::XJob> xJob = createJob();
+        UndoAgentTopResult aResult
+            = callUndoAgentTop(xJob, Any(Reference<frame::XModel>(mxComponent, UNO_QUERY_THROW)),
+                                u"AI Edits"_ustr, 10);
+
+        CPPUNIT_ASSERT_EQUAL(sal_Int32(0), aResult.nUndone);
+        CPPUNIT_ASSERT(aResult.bRefused);
+        CPPUNIT_ASSERT(aResult.sReason.indexOf("undo context is open") >= 0);
+        // Nothing was touched.
+        CPPUNIT_ASSERT_EQUAL(u"onetwo"_ustr, xText->getString());
+
+        xUndoManager->leaveUndoContext();
+    }
+
+    // 8. GIVEN one of our entries undoes cleanly and the next one throws,
+    // WHEN undo_agent_top runs, THEN the caller still learns that one step
+    // happened. Letting the exception out would have replaced the count, and
+    // the count is exactly what the caller cannot reconstruct afterwards.
+    void testUndoFailureKeepsThePartialCount()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        Reference<text::XText> xText = xTextDoc->getText();
+
+        // Bottom of the stack: an action that will refuse to be undone.
+        getUndoManager()->addUndoAction(new ThrowingUndoAction(u"AI Edits"_ustr));
+        // Top of the stack: a real edit of ours, which undoes fine.
+        insertUnderAgentContext(xText, u"one"_ustr);
+        CPPUNIT_ASSERT_EQUAL(u"one"_ustr, xText->getString());
+
+        Reference<task::XJob> xJob = createJob();
+        UndoAgentTopResult aResult
+            = callUndoAgentTop(xJob, Any(Reference<frame::XModel>(mxComponent, UNO_QUERY_THROW)),
+                                u"AI Edits"_ustr, 10);
+
+        CPPUNIT_ASSERT_EQUAL(sal_Int32(1), aResult.nUndone);
+        CPPUNIT_ASSERT(aResult.bRefused);
+        CPPUNIT_ASSERT(aResult.sReason.indexOf("after 1 step(s)") >= 0);
+        CPPUNIT_ASSERT_EQUAL(u""_ustr, xText->getString());
+    }
+
+    // 9. GIVEN the call arrives on a thread that is not the solar thread --
+    // which is how it always arrives in production, over URP -- WHEN
+    // undo_agent_top runs, THEN it completes and the edits are reverted.
+    //
+    // This is the only test that exercises the marshalling at all: every other
+    // test here calls from the solar thread, where syncExecute short-circuits
+    // to a direct call (vcl/source/helper/threadex.cxx:44-49) and the whole
+    // hop is skipped.
+    //
+    // It is NOT a deadlock reproduction, and should not be read as one. The
+    // deadlock the marshalling addresses needs a second thread already
+    // draining UndoManagerHelper's request queue; with one caller the queue is
+    // drained by that caller and the recursive SolarMutex makes even the old,
+    // unmarshalled version work. A deterministic test for the contended case
+    // would have to block inside an XUndoAction and is not written here.
+    void testRunsWhenCalledFromANonSolarThread()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        Reference<text::XText> xText = xTextDoc->getText();
+
+        insertUnderAgentContext(xText, u"one"_ustr);
+        insertUnderAgentContext(xText, u"two"_ustr);
+        CPPUNIT_ASSERT_EQUAL(u"onetwo"_ustr, xText->getString());
+
+        Reference<task::XJob> xJob = createJob();
+        const Any aModel(Reference<frame::XModel>(mxComponent, UNO_QUERY_THROW));
+
+        std::atomic<bool> bFinished(false);
+        UndoAgentTopResult aResult;
+        std::exception_ptr aWorkerException;
+
+        std::thread aWorker([&] {
+            try
+            {
+                aResult = callUndoAgentTop(xJob, aModel, u"AI Edits"_ustr, 10);
+            }
+            catch (...)
+            {
+                aWorkerException = std::current_exception();
+            }
+            bFinished = true;
+        });
+
+        // The worker's syncExecute posts a user event; nobody dispatches it
+        // unless this thread pumps. Reschedule() rather than Yield(), because
+        // Yield() waits for input and would block here after the last event
+        // has already been dispatched.
+        {
+            SolarMutexGuard aGuard;
+            const auto aDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            while (!bFinished.load())
+            {
+                // A deadline rather than an unbounded spin: the defect this
+                // test covers is a deadlock, and a failed assertion names it
+                // where a hung test process does not.
+                CPPUNIT_ASSERT_MESSAGE("undo_agent_top did not return within 30s when called "
+                                       "from a non-solar thread -- deadlock",
+                                       std::chrono::steady_clock::now() < aDeadline);
+                Application::Reschedule(true);
+            }
+        }
+        aWorker.join();
+
+        if (aWorkerException)
+            std::rethrow_exception(aWorkerException);
+
+        CPPUNIT_ASSERT_EQUAL(sal_Int32(2), aResult.nUndone);
+        CPPUNIT_ASSERT(!aResult.bRefused);
+        CPPUNIT_ASSERT_EQUAL(u""_ustr, xText->getString());
+    }
+
     CPPUNIT_TEST_SUITE(OfficeLabsJobTest);
     CPPUNIT_TEST(testUndoesTwoMatchingEntries);
     CPPUNIT_TEST(testRefusesNonMatchingTopEntry);
@@ -222,6 +385,9 @@ private:
     CPPUNIT_TEST(testEmptyUndoStackIsNotARefusal);
     CPPUNIT_TEST(testMissingModelThrows);
     CPPUNIT_TEST(testMissingMaxStepsThrows);
+    CPPUNIT_TEST(testOpenUndoContextIsRefusedNotReportedAsSuccess);
+    CPPUNIT_TEST(testUndoFailureKeepsThePartialCount);
+    CPPUNIT_TEST(testRunsWhenCalledFromANonSolarThread);
     CPPUNIT_TEST_SUITE_END();
 };
 
