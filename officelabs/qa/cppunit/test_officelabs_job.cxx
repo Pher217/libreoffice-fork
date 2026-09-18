@@ -27,6 +27,7 @@
 #include <com/sun/star/uno/XInterface.hpp>
 
 #include <cppuhelper/implbase.hxx>
+#include <osl/thread.hxx>
 #include <vcl/svapp.hxx>
 
 #include <atomic>
@@ -46,6 +47,7 @@ struct UndoAgentTopResult
 {
     sal_Int32 nUndone = 0;
     bool bRefused = false;
+    bool bStackCleared = false;
     OUString sReason;
 };
 
@@ -58,6 +60,8 @@ UndoAgentTopResult toResult(const Sequence<beans::NamedValue>& rSeq)
             rItem.Value >>= aResult.nUndone;
         else if (rItem.Name == "Refused")
             rItem.Value >>= aResult.bRefused;
+        else if (rItem.Name == "UndoStackCleared")
+            rItem.Value >>= aResult.bStackCleared;
         else if (rItem.Name == "Reason")
             rItem.Value >>= aResult.sReason;
     }
@@ -83,6 +87,27 @@ public:
     {
         throw document::UndoFailedException(u"this action always fails"_ustr, *this, Any());
     }
+    void SAL_CALL redo() override {}
+};
+
+/// An undo action that records which thread actually ran it. This is the only
+/// way to observe the marshalling from inside a test: everything else about
+/// undo_agent_top looks identical whether or not it hops to the solar thread.
+class RecordingUndoAction final : public cppu::WeakImplHelper<document::XUndoAction>
+{
+    OUString m_sTitle;
+    std::atomic<oslThreadIdentifier> m_nThread{ 0 };
+
+public:
+    explicit RecordingUndoAction(OUString sTitle)
+        : m_sTitle(std::move(sTitle))
+    {
+    }
+
+    oslThreadIdentifier getRecordedThread() const { return m_nThread.load(); }
+
+    OUString SAL_CALL getTitle() override { return m_sTitle; }
+    void SAL_CALL undo() override { m_nThread = osl::Thread::getCurrentIdentifier(); }
     void SAL_CALL redo() override {}
 };
 
@@ -134,11 +159,58 @@ private:
         return toResult(aOut);
     }
 
+    /// Runs callUndoAgentTop on a worker thread while this (solar) thread pumps,
+    /// which is the only arrangement that reaches the marshalling at all.
+    ///
+    /// Reschedule() and not Yield(): Yield() waits for input and would block
+    /// here once the last event has been dispatched. The deadline turns the
+    /// failure this covers -- a hang -- into a named assertion instead of a
+    /// test runner that never returns.
+    UndoAgentTopResult callUndoAgentTopFromWorker(const Reference<task::XJob>& xJob,
+                                                   const Any& rModel,
+                                                   const OUString& rContextTitle,
+                                                   sal_Int32 nMaxSteps)
+    {
+        std::atomic<bool> bFinished(false);
+        UndoAgentTopResult aResult;
+        std::exception_ptr aWorkerException;
+
+        std::thread aWorker([&] {
+            try
+            {
+                aResult = callUndoAgentTop(xJob, rModel, rContextTitle, nMaxSteps);
+            }
+            catch (...)
+            {
+                aWorkerException = std::current_exception();
+            }
+            bFinished = true;
+        });
+
+        {
+            SolarMutexGuard aGuard;
+            const auto aDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            while (!bFinished.load())
+            {
+                CPPUNIT_ASSERT_MESSAGE("undo_agent_top did not return within 30s when called "
+                                       "from a non-solar thread",
+                                       std::chrono::steady_clock::now() < aDeadline);
+                Application::Reschedule(true);
+            }
+        }
+        aWorker.join();
+
+        if (aWorkerException)
+            std::rethrow_exception(aWorkerException);
+        return aResult;
+    }
+
     // 1. Two actions inside an "AI Edits" undo context each -> undo_agent_top
-    // returns Undone=2, Refused=false, and both edits are reverted. This is
-    // also the test that proves the recursive-mutex assumption: execute()
-    // holds one SolarMutexGuard while calling XUndoManager methods, which
-    // re-acquire it via UndoManagerGuard. A deadlock here would hang the test.
+    // returns Undone=2, Refused=false, and both edits are reverted.
+    //
+    // Like every test here except the last two, this one calls from the solar
+    // thread, where syncExecute short-circuits to a direct call
+    // (vcl/source/helper/threadex.cxx:44-49). It says nothing about threading.
     void testUndoesTwoMatchingEntries()
     {
         loadFromURL(u"private:factory/swriter"_ustr);
@@ -217,7 +289,7 @@ private:
         CPPUNIT_ASSERT(!aResult.bRefused);
     }
 
-    // 5. Missing Model -> IllegalArgumentException.
+    // 5. MaxSteps omitted -> IllegalArgumentException.
     void testMissingMaxStepsThrows()
     {
         // MaxSteps omitted leaves the loop bound at 0, which would undo
@@ -304,23 +376,20 @@ private:
         CPPUNIT_ASSERT(aResult.bRefused);
         CPPUNIT_ASSERT(aResult.sReason.indexOf("after 1 step(s)") >= 0);
         CPPUNIT_ASSERT_EQUAL(u""_ustr, xText->getString());
+
+        // The part that matters more than the count. A failed undo does not
+        // merely stop -- SfxUndoManager::Undo calls ImplClearUndo() and rethrows
+        // (svl/source/undo/undo.cxx:744-752), which XUndoManager.idl:177-179
+        // states as a guarantee. The whole stack is gone, and the result has to
+        // say so or the caller will believe it can still undo.
+        CPPUNIT_ASSERT(aResult.bStackCleared);
+        CPPUNIT_ASSERT(aResult.sReason.indexOf("CLEARED THE WHOLE UNDO STACK") >= 0);
+        CPPUNIT_ASSERT(!getUndoManager()->getAllUndoActionTitles().hasElements());
     }
 
     // 9. GIVEN the call arrives on a thread that is not the solar thread --
     // which is how it always arrives in production, over URP -- WHEN
     // undo_agent_top runs, THEN it completes and the edits are reverted.
-    //
-    // This is the only test that exercises the marshalling at all: every other
-    // test here calls from the solar thread, where syncExecute short-circuits
-    // to a direct call (vcl/source/helper/threadex.cxx:44-49) and the whole
-    // hop is skipped.
-    //
-    // It is NOT a deadlock reproduction, and should not be read as one. The
-    // deadlock the marshalling addresses needs a second thread already
-    // draining UndoManagerHelper's request queue; with one caller the queue is
-    // drained by that caller and the recursive SolarMutex makes even the old,
-    // unmarshalled version work. A deterministic test for the contended case
-    // would have to block inside an XUndoAction and is not written here.
     void testRunsWhenCalledFromANonSolarThread()
     {
         loadFromURL(u"private:factory/swriter"_ustr);
@@ -332,50 +401,46 @@ private:
         CPPUNIT_ASSERT_EQUAL(u"onetwo"_ustr, xText->getString());
 
         Reference<task::XJob> xJob = createJob();
-        const Any aModel(Reference<frame::XModel>(mxComponent, UNO_QUERY_THROW));
-
-        std::atomic<bool> bFinished(false);
-        UndoAgentTopResult aResult;
-        std::exception_ptr aWorkerException;
-
-        std::thread aWorker([&] {
-            try
-            {
-                aResult = callUndoAgentTop(xJob, aModel, u"AI Edits"_ustr, 10);
-            }
-            catch (...)
-            {
-                aWorkerException = std::current_exception();
-            }
-            bFinished = true;
-        });
-
-        // The worker's syncExecute posts a user event; nobody dispatches it
-        // unless this thread pumps. Reschedule() rather than Yield(), because
-        // Yield() waits for input and would block here after the last event
-        // has already been dispatched.
-        {
-            SolarMutexGuard aGuard;
-            const auto aDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-            while (!bFinished.load())
-            {
-                // A deadline rather than an unbounded spin: the defect this
-                // test covers is a deadlock, and a failed assertion names it
-                // where a hung test process does not.
-                CPPUNIT_ASSERT_MESSAGE("undo_agent_top did not return within 30s when called "
-                                       "from a non-solar thread -- deadlock",
-                                       std::chrono::steady_clock::now() < aDeadline);
-                Application::Reschedule(true);
-            }
-        }
-        aWorker.join();
-
-        if (aWorkerException)
-            std::rethrow_exception(aWorkerException);
+        UndoAgentTopResult aResult = callUndoAgentTopFromWorker(
+            xJob, Any(Reference<frame::XModel>(mxComponent, UNO_QUERY_THROW)), u"AI Edits"_ustr, 10);
 
         CPPUNIT_ASSERT_EQUAL(sal_Int32(2), aResult.nUndone);
         CPPUNIT_ASSERT(!aResult.bRefused);
         CPPUNIT_ASSERT_EQUAL(u""_ustr, xText->getString());
+    }
+
+    // 10. GIVEN the call arrives on a non-solar thread, WHEN an undo action
+    // runs, THEN it runs ON THE SOLAR THREAD.
+    //
+    // This is the test that distinguishes the two implementations, and the
+    // reason it exists: without it, deleting the syncExecute hop and calling
+    // doUndoAgentTop directly leaves the whole suite green, so the marshalling
+    // would be load-bearing in intent and unpinned in fact. Here the direct
+    // call records the worker's id and this fails; the marshalled call records
+    // the solar thread's and it passes.
+    //
+    // It pins the behaviour. It does not, and cannot, show the behaviour is
+    // necessary -- see the comment block in OfficeLabsJob.cxx, which is blunt
+    // about what the hop does and does not buy.
+    void testUndoRunsOnTheSolarThread()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        CPPUNIT_ASSERT_MESSAGE("the fixture itself must be on the solar thread, or this "
+                               "test compares two of the same thing",
+                               Application::IsMainThread());
+        const oslThreadIdentifier nSolarThread = osl::Thread::getCurrentIdentifier();
+
+        rtl::Reference<RecordingUndoAction> pAction(new RecordingUndoAction(u"AI Edits"_ustr));
+        getUndoManager()->addUndoAction(pAction);
+
+        Reference<task::XJob> xJob = createJob();
+        UndoAgentTopResult aResult = callUndoAgentTopFromWorker(
+            xJob, Any(Reference<frame::XModel>(mxComponent, UNO_QUERY_THROW)), u"AI Edits"_ustr, 1);
+
+        CPPUNIT_ASSERT_EQUAL(sal_Int32(1), aResult.nUndone);
+        CPPUNIT_ASSERT_MESSAGE("the undo action never ran at all",
+                               pAction->getRecordedThread() != 0);
+        CPPUNIT_ASSERT_EQUAL(nSolarThread, pAction->getRecordedThread());
     }
 
     CPPUNIT_TEST_SUITE(OfficeLabsJobTest);
@@ -388,6 +453,7 @@ private:
     CPPUNIT_TEST(testOpenUndoContextIsRefusedNotReportedAsSuccess);
     CPPUNIT_TEST(testUndoFailureKeepsThePartialCount);
     CPPUNIT_TEST(testRunsWhenCalledFromANonSolarThread);
+    CPPUNIT_TEST(testUndoRunsOnTheSolarThread);
     CPPUNIT_TEST_SUITE_END();
 };
 

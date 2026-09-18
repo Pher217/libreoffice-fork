@@ -20,6 +20,7 @@
 #include <com/sun/star/lang/IllegalArgumentException.hpp>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/beans/NamedValue.hpp>
+#include <com/sun/star/document/UndoFailedException.hpp>
 #include <com/sun/star/document/XUndoManager.hpp>
 #include <com/sun/star/document/XUndoManagerSupplier.hpp>
 #include <com/sun/star/frame/XModel.hpp>
@@ -108,6 +109,7 @@ struct UndoAgentTopOutcome
 {
     sal_Int32 nUndone = 0;
     bool bRefused = false;
+    bool bStackCleared = false;
     OUString sReason;
 };
 
@@ -168,14 +170,36 @@ UndoAgentTopOutcome doUndoAgentTop(const css::uno::Reference<css::document::XUnd
         {
             xUndoManager->undo();
         }
+        catch (const css::document::UndoFailedException& rEx)
+        {
+            // THIS IS NOT A PARTIAL UNDO. UndoFailedException carries a
+            // documented side effect that dwarfs the failure itself:
+            //
+            //   "In this case, the undo stack of the undo manager will have
+            //    been cleared."
+            //   -- offapi/com/sun/star/document/XUndoManager.idl:177-179
+            //
+            // and SfxUndoManager::Undo does exactly that -- on any throw from
+            // the action it calls ImplClearUndo() and rethrows
+            // (svl/source/undo/undo.cxx:744-752). So the user's entire undo
+            // history is gone, not just ours. Reporting this as "undone N, then
+            // it stopped" would be the most misleading result this component
+            // could return, so it gets its own flag and says so in words.
+            aOut.bStackCleared = true;
+            aOut.bRefused = true;
+            aOut.sReason = "undo failed after " + OUString::number(aOut.nUndone)
+                           + " step(s) AND CLEARED THE WHOLE UNDO STACK, including entries this "
+                             "agent did not create -- the document cannot be undone further: "
+                           + rEx.Message;
+            break;
+        }
         catch (const css::uno::Exception& rEx)
         {
-            // Letting this propagate would replace the count with an exception,
-            // and the count is the part the caller cannot reconstruct: after a
-            // throw on step 3 of 5 the document has moved and the agent has no
-            // way to learn how far. Report the partial count and the reason
-            // instead -- a half-done undo the caller knows about beats a
-            // half-done undo it does not.
+            // Everything else -- EmptyUndoStackException and
+            // UndoContextNotClosedException from the helper's own re-check
+            // (undomanagerhelper.cxx:632-639) -- leaves the stack alone. Report
+            // the count, because it is the one thing the caller cannot
+            // reconstruct once the document has moved.
             aOut.bRefused = true;
             aOut.sReason = "undo failed after " + OUString::number(aOut.nUndone) + " step(s): "
                            + rEx.Message;
@@ -189,45 +213,65 @@ UndoAgentTopOutcome doUndoAgentTop(const css::uno::Reference<css::document::XUnd
 
 // Undoes entries at the top of the agent's undo stack that belong to a named
 // undo context, in a single execute() call. Two separate UNO round trips --
-// read the top title, then undo -- leave a window on the VCL thread in which
-// the stack can change between them; one call closes that window.
+// read the top title, then undo -- leave a window in which the stack can change
+// between them; one call closes it against DOCUMENT EDITS, which need the
+// SolarMutex we hold (SwXText::insertString and friends). It does NOT close it
+// against another thread's XUndoManager API calls: enterUndoContext and
+// addUndoAction clear their SolarMutex at undomanagerhelper.cxx:474 and then
+// mutate under m_aMutex alone. The helper re-checks and throws in that case
+// (ibid.:632-639), which surfaces here as a refusal with an approximate
+// reason -- bounded, but not the same as serialised.
 //
-// WHY THIS HOPS TO THE MAIN THREAD
+// WHY THIS HOPS TO THE MAIN THREAD -- and what that does NOT buy
 // The call always arrives over URP, on a thread that is not the solar thread.
 // Undo is not a data-structure operation: reverting a Writer action runs view
 // code -- invalidation, cursor and selection movement, scrolling -- which ends
-// in VCL and, on macOS, in AppKit. AppKit off the main thread is undefined,
-// which is why framework marshals its own dispatches the same way when a
-// caller asks for it (framework/source/services/dispatchhelper.cxx:115-119,
-// frame.cxx:579-590, both keyed on the OnMainThread descriptor property).
-// Holding the SolarMutex from a foreign thread is necessary for that work but
-// it is not sufficient, and this component had only the mutex.
+// in VCL and, on macOS, in AppKit.
 //
-// Second, the undo helper documents a precondition the mutex-only version
-// cannot honour. impl_doUndoRedo() opens with
+// Two earlier justifications for this hop were WRONG and are recorded here so
+// nobody rebuilds an argument on them:
+//
+//   * "AppKit off the main thread is undefined, so we must marshal." The macOS
+//     backend is built for precisely the opposite case: OSX_RUNINMAIN
+//     (vcl/inc/osx/runinmain.hxx:67-90) checks !IsMainThread(), asserts the
+//     SolarMutex is held, and bounces the AppKit call to the main queue itself.
+//     AquaSalFrame::Flush -- the repaint an undo triggers -- is guarded that way
+//     (vcl/osx/salframe.cxx:1148). A foreign thread holding the SolarMutex is a
+//     supported caller, so this hop is not required for AppKit safety.
+//
+//   * "It executes in exactly the position Edit > Undo executes in." Also false.
+//     Writer's menu Undo never touches this machinery at all: SwWrtShell::Do ->
+//     SwEditShell::Undo -> IDocumentUndoRedo::UndoWithOffset ->
+//     sw::UndoManager (sw/source/core/undo/docundo.cxx:750-762) -> SfxUndoManager.
+//     UndoManagerHelper's request queue is reached only through the UNO
+//     XUndoManager API, so there is no shipped path whose guarantees we inherit.
+//
+// Nor does the hop fix the deadlock in UndoManagerHelper's own precondition --
 //
 //     ::osl::Guard< ::framework::IMutex > aExternalGuard( i_externalLock.getGuardedMutex() );
 //         // note that this assumes that the mutex has been released in the
 //         // thread which added the Undo/Redo request, so we can successfully
 //         // acquire it
+//     (framework/source/fwe/helper/undomanagerhelper.cxx:622-626)
 //
-// (framework/source/fwe/helper/undomanagerhelper.cxx:622-626). undo() does not
-// run the work inline: impl_processRequest() queues it, calls
-// i_instanceLock.clear() -- which drops DocumentUndoManager's own
-// UndoManagerGuard but not an outer guard of ours, the SolarMutex being
-// recursive -- and, if another thread is already draining the queue, blocks in
-// pRequest->wait() (ibid.:479) with our guard still held. The draining thread
-// then wants the mutex we are sitting on.
+// -- because impl_processRequest()'s i_instanceLock.clear() (ibid.:474) drops
+// exactly one recursion level, and the main thread dispatching a user event
+// already holds one. Under contention the main thread blocks at ibid.:479 still
+// owning the mutex, which is the same trap one level up: worse, it freezes the
+// UI rather than one agent call. A deterministic test for that exists (block an
+// XUndoManagerListener::leftContext on another thread) and is not written yet.
 //
-// Be precise about that second one: it needs contention to bite. With no other
-// thread in the queue we drain it ourselves and the recursive mutex makes it
-// work, which is why every main-thread cppunit test below passes either way.
-// Running on the solar thread does not make the contended case impossible --
-// the main thread can wait on the queue holding the mutex too. What it does is
-// stop us being a special case: the sequence now executes in exactly the
-// position Edit > Undo executes in, so it inherits whatever guarantees ship
-// with that path instead of resting on an untested assumption about a foreign
-// thread's recursive lock.
+// What the hop IS for, stated no more strongly than it deserves: it is the
+// shape upstream uses for UNO calls that drive view code -- the OnMainThread
+// media-descriptor property routes storeToURL through the same syncExecute
+// (sfx2/source/doc/sfxbasemodel.cxx:1813-1815), as do DispatchHelper
+// (framework/source/services/dispatchhelper.cxx:115-119) and Frame
+// (frame.cxx:579-590). Taking it costs one event hop and removes any need to
+// prove that OSX_RUNINMAIN's per-call coverage is complete for every path a
+// Writer undo can reach. That is a conservatism argument, not a correctness
+// proof, and no test in this module distinguishes the two shapes except
+// testUndoRunsOnTheSolarThread, which pins the behaviour rather than
+// justifying it.
 //
 // SolarThreadExecutor::execute() posts a user event and takes a
 // SolarMutexReleaser while it waits (vcl/source/helper/threadex.cxx:55-64), so
@@ -285,6 +329,7 @@ OfficeLabsJob::executeUndoAgentTop(const css::uno::Sequence<css::beans::NamedVal
     const css::uno::Sequence<css::beans::NamedValue> aResult{
         { u"Undone"_ustr, css::uno::Any(aOutcome.nUndone) },
         { u"Refused"_ustr, css::uno::Any(aOutcome.bRefused) },
+        { u"UndoStackCleared"_ustr, css::uno::Any(aOutcome.bStackCleared) },
         { u"Reason"_ustr, css::uno::Any(aOutcome.sReason) },
     };
     return css::uno::Any(aResult);
