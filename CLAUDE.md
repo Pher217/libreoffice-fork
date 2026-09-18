@@ -54,6 +54,13 @@ differs** and leaves every identical file's mtime untouched, moving neither HEAD
 mtime property is the whole point: gbuild then rebuilds exactly what you changed, so a one-module
 edit stays a ~2 minute incremental build.
 
+Its own tests are `./test-build-sandbox.sh` — 15 assertions against throwaway git repos, no
+LibreOffice build required (`BUILD_CMD=true` stands in for `gmake`). Run them after touching the
+script. They exist because the first version of this suite passed while silently exercising the
+**real** checkout instead of its fixture: the script resolves its sandbox from its own location, so
+targeting another tree needs `--sandbox <path>`. The first assertion now proves which tree was
+resolved.
+
 **It refuses to run against a dirty sandbox**, listing what it found. That is deliberate. The
 sandbox regularly carries a deliberate uncommitted probe staged for a headed run — project#192 kept
 an instrumented `salframeview.mm` there for days — and silently overwriting that destroys another

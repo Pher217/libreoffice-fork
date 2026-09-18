@@ -32,22 +32,17 @@
 #   ./build-sandbox.sh --branch <branch> [--paths <p>...] [--make-args "..."]
 #   ./build-sandbox.sh --branch <branch> --dry-run
 #   ./build-sandbox.sh --restore                 # put the sandbox back on master
+#   ./build-sandbox.sh --sandbox <path> …        # target another checkout (used by the tests)
 #
 # The sandbox is left carrying the branch content after a build, on purpose --
 # you usually want to run what you just built. Run --restore when done.
 
 set -euo pipefail
 
-SANDBOX="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# If this script is running from inside a worktree, the sandbox is the MAIN
-# checkout, which is the dirname of the common git dir.
-cdir=$(git -C "$SANDBOX" rev-parse --git-common-dir)
-case "$cdir" in /*) ;; *) cdir="$SANDBOX/$cdir" ;; esac
-SANDBOX=$(cd "$(dirname "$cdir")" && pwd)
-
-BRANCH=""; DRY=0; RESTORE=0; MAKE_ARGS=""; PATHS=()
+BRANCH=""; DRY=0; RESTORE=0; MAKE_ARGS=""; SANDBOX_OPT=""; PATHS=()
 while [ $# -gt 0 ]; do
   case "$1" in
+    --sandbox)   SANDBOX_OPT="$2"; shift 2 ;;
     --branch)    BRANCH="$2"; shift 2 ;;
     --paths)     shift; while [ $# -gt 0 ] && [ "${1#--}" = "$1" ]; do PATHS+=("$1"); shift; done ;;
     --make-args) MAKE_ARGS="$2"; shift 2 ;;
@@ -57,6 +52,21 @@ while [ $# -gt 0 ]; do
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# Resolve the sandbox. Default: this script lives IN the sandbox (the main
+# checkout), so start from its own location -- which stays correct when the
+# script is invoked from a worktree copy, because --git-common-dir then points
+# back at the main checkout. --sandbox overrides it, which is what makes the
+# script testable: without it the test suite silently exercised the real fork
+# instead of its fixture, and passed.
+if [ -n "$SANDBOX_OPT" ]; then
+  SANDBOX=$(cd "$SANDBOX_OPT" && pwd) || { echo "!! no such sandbox: $SANDBOX_OPT" >&2; exit 2; }
+else
+  SANDBOX="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+cdir=$(git -C "$SANDBOX" rev-parse --git-common-dir)
+case "$cdir" in /*) ;; *) cdir="$SANDBOX/$cdir" ;; esac
+SANDBOX=$(cd "$(dirname "$cdir")" && pwd)
 
 echo "sandbox: $SANDBOX"
 
