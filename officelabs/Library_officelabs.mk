@@ -2,6 +2,8 @@
 
 $(eval $(call gb_Library_Library,officelabs))
 
+$(eval $(call gb_Library_set_componentfile,officelabs,officelabs/util/officelabs,services))
+
 $(eval $(call gb_Library_add_defs,officelabs,\
     -DOFFICELABS_DLLIMPLEMENTATION \
 ))
@@ -57,6 +59,7 @@ $(eval $(call gb_Library_add_exception_objects,officelabs,\
     officelabs/source/CefDebugPort \
     officelabs/source/DocumentController \
     officelabs/source/InlineCompletionEligibility \
+    officelabs/source/OfficeLabsJob \
 ))
 
 # === CEF WebView support (conditional on --with-cef) ===
