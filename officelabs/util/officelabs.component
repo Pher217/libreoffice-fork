@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- officelabs's first UNO component: see officelabs/source/OfficeLabsJob.cxx. -->
+<component loader="com.sun.star.loader.SharedLibrary" environment="@CPPU_ENV@"
+    xmlns="http://openoffice.org/2010/uno-components">
+  <implementation name="ai.officelabs.comp.OfficeLabsJob"
+      constructor="ai_officelabs_comp_OfficeLabsJob_get_implementation">
+    <service name="ai.officelabs.OfficeLabsJob"/>
+  </implementation>
+</component>
