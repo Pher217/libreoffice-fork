@@ -49,6 +49,18 @@ absurd for a task worktree that lives a day.
 ./build-sandbox.sh --restore                                             # put the sandbox back
 ```
 
+`--restore` refuses on a dirty sandbox exactly as a sync does, and restores from
+**HEAD** rather than `origin/master` — restoring from origin while local master is
+behind would leave the sandbox dirty against its own HEAD and get every later run
+refused. `--force` overrides either refusal and prints what it is about to destroy.
+
+Two things the guard cannot see, so the script checks them separately: an
+**untracked** file at a path the target branch tracks (it is in no git object, so
+overwriting it is unrecoverable), and a second concurrent run (one build tree, one
+builder — `mkdir`-based lock). Note also that `git restore` is **no-overlay**: a
+tracked file present at HEAD but absent on the branch is *deleted* by a sync with
+`--paths .`. `--dry-run` lists everything it would rewrite.
+
 It syncs with `git restore --source=<branch> --worktree`, which **rewrites only files whose content
 differs** and leaves every identical file's mtime untouched, moving neither HEAD nor the index. That
 mtime property is the whole point: gbuild then rebuilds exactly what you changed, so a one-module

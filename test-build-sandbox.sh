@@ -85,6 +85,32 @@ a=$(stat -f %m officelabs/a.cxx); b=$(stat -f %m other/b.cxx)
 eq "HEAD was not moved" "$head_before" "$(git -C "$FIXTURE" rev-parse HEAD)"
 eq "the index was not staged" "" "$(git -C "$FIXTURE" diff --cached --name-only)"
 
+# --- the gaps an adversarial review found: both destroy work ----------------
+
+# --restore used to sit ABOVE the dirty guard, so the one command documented as
+# "put the sandbox back" was the one that would delete a staged probe.
+echo "probe" > other/b.cxx
+probe=$(md5 -q other/b.cxx)
+"$SUT" --sandbox "$FIXTURE" --restore >/dev/null 2>&1
+eq "--restore refuses on a dirty sandbox" 1 $?
+eq "--restore leaves the probe byte-identical" "$probe" "$(md5 -q other/b.cxx)"
+"$SUT" --sandbox "$FIXTURE" --restore --force >/dev/null 2>&1
+eq "--restore --force is allowed through" 0 $?
+git -C "$FIXTURE" checkout -q -- other/b.cxx
+
+# An untracked file at a path the branch tracks is in no git object, so
+# overwriting it is unrecoverable -- and the dirty guard cannot see it.
+echo "unsaved" > officelabs/a.cxx.new
+git -C "$FIXTURE" show feature:officelabs/a.cxx > /dev/null 2>&1
+cp officelabs/a.cxx.new officelabs/a.cxx.untracked
+rm -f officelabs/a.cxx.new
+# make the clash real: an untracked file at a path `feature` also tracks
+rm -f officelabs/a.cxx && echo "unsaved work" > officelabs/a.cxx
+eq "untracked file at a branch-tracked path is refused" 1 \
+   "$(BUILD_CMD=true "$SUT" --sandbox "$FIXTURE" --branch feature --paths . >/dev/null 2>&1; echo $?)"
+eq "  and it is left untouched" "unsaved work" "$(cat officelabs/a.cxx)"
+git -C "$FIXTURE" checkout -q -- officelabs/a.cxx 2>/dev/null || true
+
 cd /; rm -rf "$FIXTURE"
 echo; echo "  $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
