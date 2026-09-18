@@ -1138,6 +1138,24 @@ private:
         xController->dispose();
     }
 
+    // 26. GIVEN a 40 px document font and a 16 px caret WHEN a suggestion is
+    // shown THEN the ghost window is as tall as the text, so nothing is clipped.
+    void testTallFontGrowsGhostWindow()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        rtl::Reference<officelabs::InlineCompletionController> xController = showWithFontProvider(
+            []() { return std::optional<vcl::Font>(vcl::Font(u"Liberation Serif"_ustr, Size(0, 40))); });
+
+        // Guard against the vacuous pass: two zero heights are also equal.
+        CPPUNIT_ASSERT(xController->ghostTextHeight() > 0);
+        CPPUNIT_ASSERT_EQUAL(xController->ghostTextHeight(), xController->ghostWindowHeight());
+
+        xController->dispose();
+    }
+
     CPPUNIT_TEST_SUITE(InlineCompletionControllerTest);
     CPPUNIT_TEST(testAcceptSuggestion);
     CPPUNIT_TEST(testTabAcceptsSuggestion);
@@ -1161,6 +1179,7 @@ private:
     CPPUNIT_TEST(testFontProviderAppliesDocFont);
     CPPUNIT_TEST(testDefaultFontProviderUsesCursorHeight);
     CPPUNIT_TEST(testNoDocFontFallsBackToAppFont);
+    CPPUNIT_TEST(testTallFontGrowsGhostWindow);
     CPPUNIT_TEST(testGhostWindowHeightIsTextHeight);
     CPPUNIT_TEST(testMatchingLowercaseTypesThrough);
     CPPUNIT_TEST(testShiftedMatchingCharacterTypesThrough);
