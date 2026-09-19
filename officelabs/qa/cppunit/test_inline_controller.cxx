@@ -1198,12 +1198,20 @@ private:
 
         xController->requestNow();
         CPPUNIT_ASSERT(xController->isInFlight());
+        // pCalls is incremented on the fetcher thread, which requestNow only
+        // spawns -- wait for it to actually enter the fetcher before counting.
+        for (int i = 0; i < 200 && pCalls->load() < 1; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
         CPPUNIT_ASSERT_EQUAL(1, pCalls->load());
 
         // Without the watchdog this fire is swallowed by the in-flight guard
         // and nCalls stays 1 for the rest of the session.
         xController->requestNow();
 
+        // pCalls is incremented on the fetcher thread, which requestNow only
+        // spawns -- wait for it to actually enter the fetcher before counting.
+        for (int i = 0; i < 200 && pCalls->load() < 2; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
         CPPUNIT_ASSERT_EQUAL(2, pCalls->load());
 
         *pRelease = true;
@@ -1246,6 +1254,10 @@ private:
 
         xController->requestNow();          // generation A, never returns yet
         xController->requestNow();          // watchdog abandons A, issues B
+        // pCalls is incremented on the fetcher thread, which requestNow only
+        // spawns -- wait for it to actually enter the fetcher before counting.
+        for (int i = 0; i < 200 && pCalls->load() < 2; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
         CPPUNIT_ASSERT_EQUAL(2, pCalls->load());
         CPPUNIT_ASSERT(xController->isInFlight());
 
