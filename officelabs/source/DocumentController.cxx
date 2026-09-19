@@ -33,6 +33,28 @@ using namespace css;
 
 namespace officelabs {
 
+namespace {
+
+// How much document context getCursorContext() collects around the caret.
+//
+// Before this, it returned the current paragraph and nothing else, so a fact one
+// paragraph above the caret was invisible to inline completion no matter how
+// large the agent's own window was (officelabs-project#336). The agent-side cap
+// and InlineCompletionEligibility both clip to 2000 before anything is sent, so
+// collecting more than that here would be discarded downstream.
+const sal_Int32 MAX_CONTEXT_BEFORE_CHARS = 2000;
+const sal_Int32 MAX_CONTEXT_AFTER_CHARS = 500;
+
+// A hard bound on paragraph traversal, independent of the character budgets.
+// getCursorContext() runs on the VCL thread on every debounce (150 ms), so the
+// pathological document -- hundreds of one-character paragraphs, e.g. a long
+// list -- must not turn each keystroke into hundreds of UNO round trips. With
+// ordinary prose the character budget is reached in a handful of hops and this
+// never binds.
+const sal_Int32 MAX_CONTEXT_PARAGRAPH_HOPS = 64;
+
+} // anonymous namespace
+
 DocumentController::DocumentController()
 {
 }
@@ -410,6 +432,17 @@ CursorContext DocumentController::getCursorContext()
         if (!xParaBefore.is())
             return aContext;
         xParaBefore->gotoStartOfParagraph(true);
+        // Walk back across earlier paragraphs until the budget is met (#336).
+        // gotoPreviousParagraph(true) moves to the START of the previous
+        // paragraph and expands, so the selection already covers that whole
+        // paragraph -- no separate goto-end is needed on this side.
+        for (sal_Int32 nHops = 0; nHops < MAX_CONTEXT_PARAGRAPH_HOPS; ++nHops)
+        {
+            if (xParaBefore->getString().getLength() >= MAX_CONTEXT_BEFORE_CHARS)
+                break;
+            if (!xParaBefore->gotoPreviousParagraph(true))
+                break;
+        }
         aContext.textBefore = xParaBefore->getString();
 
         uno::Reference<text::XTextCursor> xAfter
@@ -418,6 +451,17 @@ CursorContext DocumentController::getCursorContext()
         if (!xParaAfter.is())
             return aContext;
         xParaAfter->gotoEndOfParagraph(true);
+        // Same forward, with one difference: gotoNextParagraph(true) lands on
+        // the START of the next paragraph, so its text is only included once
+        // gotoEndOfParagraph(true) runs again.
+        for (sal_Int32 nHops = 0; nHops < MAX_CONTEXT_PARAGRAPH_HOPS; ++nHops)
+        {
+            if (xParaAfter->getString().getLength() >= MAX_CONTEXT_AFTER_CHARS)
+                break;
+            if (!xParaAfter->gotoNextParagraph(true))
+                break;
+            xParaAfter->gotoEndOfParagraph(true);
+        }
         aContext.textAfter = xParaAfter->getString();
 
         aContext.readOnly = false;
