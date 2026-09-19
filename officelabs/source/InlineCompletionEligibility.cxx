@@ -122,7 +122,7 @@ OString buildCompletionRequest(const CursorContext& rContext)
 
     OStringBuffer aBuf;
     aBuf.append("{\"text_before\":\"").append(jsonEscape(sBefore.toUtf8()));
-    aBuf.append("\",\"text_after\":\"").append(jsonEscape(rContext.textAfter.toUtf8()));
+    aBuf.append("\",\"text_after\":\"").append(jsonEscape(rContext.textAfterContext.toUtf8()));
     aBuf.append("\",\"mode\":\"inline\",\"max_suggestions\":1}");
     return aBuf.makeStringAndClear();
 }

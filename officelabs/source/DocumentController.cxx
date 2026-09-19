@@ -458,8 +458,9 @@ CursorContext DocumentController::getCursorContext()
         // Clip to the budget. The loop above stops *before* a hop that would
         // exceed it, so the final hop can overshoot by a whole paragraph --
         // 2000 was a threshold, not a bound. textBefore is additionally clipped
-        // downstream by InlineCompletionEligibility, but textAfter is not
-        // clipped anywhere, so doing it here is what actually bounds the wire.
+        // downstream by InlineCompletionEligibility, but textAfterContext is
+        // not clipped anywhere, so doing it here is what actually bounds the
+        // wire.
         aContext.textBefore = clipTail(xParaBefore->getString(), MAX_CONTEXT_BEFORE_CHARS);
 
         uno::Reference<text::XTextCursor> xAfter
@@ -468,6 +469,13 @@ CursorContext DocumentController::getCursorContext()
         if (!xParaAfter.is())
             return aContext;
         xParaAfter->gotoEndOfParagraph(true);
+        // Read the paragraph-local remainder BEFORE widening. This is the
+        // eligibility gate: ghost text is offered only at the end of the
+        // caret's own paragraph, and isEligible() asks that of textAfter.
+        // Taking it after the walk below would ask it of the whole forward
+        // window, which is never whitespace-only unless the caret sits in the
+        // document's last non-blank paragraph -- the fork#75 defect.
+        aContext.textAfter = xParaAfter->getString();
         // Same forward, with one difference: gotoNextParagraph(true) lands on
         // the START of the next paragraph, so its text is only included once
         // gotoEndOfParagraph(true) runs again.
@@ -479,7 +487,9 @@ CursorContext DocumentController::getCursorContext()
                 break;
             xParaAfter->gotoEndOfParagraph(true);
         }
-        aContext.textAfter = clipHead(xParaAfter->getString(), MAX_CONTEXT_AFTER_CHARS);
+        // The forward context that goes on the wire. Clipped here because
+        // nothing downstream bounds it.
+        aContext.textAfterContext = clipHead(xParaAfter->getString(), MAX_CONTEXT_AFTER_CHARS);
 
         aContext.readOnly = false;
         if (m_xModel.is())
