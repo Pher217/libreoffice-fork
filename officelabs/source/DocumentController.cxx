@@ -468,17 +468,15 @@ CursorContext DocumentController::getCursorContext()
         if (!xParaAfter.is())
             return aContext;
         xParaAfter->gotoEndOfParagraph(true);
-        // Same forward, with one difference: gotoNextParagraph(true) lands on
-        // the START of the next paragraph, so its text is only included once
-        // gotoEndOfParagraph(true) runs again.
-        for (sal_Int32 nHops = 0; nHops < MAX_CONTEXT_PARAGRAPH_HOPS; ++nHops)
-        {
-            if (xParaAfter->getString().getLength() >= MAX_CONTEXT_AFTER_CHARS)
-                break;
-            if (!xParaAfter->gotoNextParagraph(true))
-                break;
-            xParaAfter->gotoEndOfParagraph(true);
-        }
+        // textAfter stays PARAGRAPH-LOCAL on purpose. It is not a context
+        // budget -- it is the eligibility gate: InlineCompletionEligibility
+        // returns textAfter.trim().isEmpty(), so any text put here SUPPRESSES
+        // the completion. #75 walked forward over following paragraphs, which
+        // made textAfter non-empty for a caret at the end of any paragraph with
+        // text below it, and ghost text only appeared at the end of the last
+        // non-blank paragraph of the document. Widen textBefore freely; widening
+        // this field narrows where the feature works. If the model ever needs
+        // trailing context, add a SEPARATE field and leave this one alone.
         aContext.textAfter = clipHead(xParaAfter->getString(), MAX_CONTEXT_AFTER_CHARS);
 
         aContext.readOnly = false;
