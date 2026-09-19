@@ -1253,6 +1253,15 @@ private:
         xController->setInFlightTimeoutMsForTest(0);
 
         xController->requestNow();          // generation A, never returns yet
+        // Wait for A to actually ENTER the fetcher before issuing B. The
+        // fetcher picks its gate by ++pCalls, so if B's increment landed
+        // first it would take pReleaseFirst and the release below would
+        // free the LIVE request instead of the abandoned one -- isInFlight()
+        // would then be false and this test would fail for the wrong reason.
+        for (int i = 0; i < 200 && pCalls->load() < 1; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        CPPUNIT_ASSERT_EQUAL(1, pCalls->load());
+
         xController->requestNow();          // watchdog abandons A, issues B
         // pCalls is incremented on the fetcher thread, which requestNow only
         // spawns -- wait for it to actually enter the fetcher before counting.
