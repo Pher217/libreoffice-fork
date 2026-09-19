@@ -9,6 +9,9 @@
 
 #include <test/unoapi_test.hxx>
 
+#include <comphelper/string.hxx>
+#include <rtl/ustrbuf.hxx>
+
 #include <cppunit/TestAssert.h>
 #include <cppunit/TestFixture.h>
 #include <cppunit/extensions/HelperMacros.h>
@@ -131,7 +134,13 @@ public:
 
     // GIVEN a Writer document with two paragraphs
     // WHEN the view cursor is at the end of the second paragraph
-    // THEN textBefore is paragraph-local "Second para".
+    // THEN textBefore reaches back past the paragraph break and includes the
+    // first paragraph too.
+    //
+    // This case previously asserted paragraph-local "Second para". That was the
+    // defect, not the contract: a fact one paragraph above the caret could not
+    // reach inline completion however large the agent's window was
+    // (officelabs-project#336).
     void testCursorContext_twoParagraphs()
     {
         loadFromURL(u"private:factory/swriter"_ustr);
@@ -154,8 +163,78 @@ public:
         xViewCursor->gotoEnd(false);
 
         const CursorContext aContext = aController.getCursorContext();
-        CPPUNIT_ASSERT_EQUAL(u"Second para"_ustr, aContext.textBefore);
+        // Asserted by containment and order rather than by an exact separator:
+        // what this pins is that the earlier paragraph is reached at all, not
+        // how UNO serialises a paragraph break.
+        CPPUNIT_ASSERT(aContext.textBefore.indexOf(u"First para") >= 0);
+        CPPUNIT_ASSERT(aContext.textBefore.endsWith(u"Second para"_ustr));
         CPPUNIT_ASSERT_EQUAL(OUString(), aContext.textAfter);
+    }
+
+    // GIVEN a document whose earlier paragraphs exceed the 2000-char budget
+    // WHEN the caret is at the end
+    // THEN textBefore stops at the budget rather than collecting the document.
+    void testCursorContext_beforeStopsAtCharBudget()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDocument(mxComponent, UNO_QUERY_THROW);
+        Reference<text::XText> xText = xTextDocument->getText();
+        // 40 paragraphs x 100 chars = 4000, comfortably past the budget.
+        OUStringBuffer aFillBuf(100);
+        comphelper::string::padToLength(aFillBuf, 100, 'x');
+        const OUString aFill = aFillBuf.makeStringAndClear();
+        for (int i = 0; i < 40; ++i)
+        {
+            xText->insertString(xText->getEnd(), aFill, false);
+            xText->insertControlCharacter(xText->getEnd(),
+                                          text::ControlCharacter::PARAGRAPH_BREAK, false);
+        }
+        xText->insertString(xText->getEnd(), u"tail"_ustr, false);
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        officelabs::DocumentController aController;
+        aController.setModel(xModel);
+        aController.setDocument(xTextDocument);
+
+        Reference<text::XTextViewCursorSupplier> xViewCursorSupplier(
+            xModel->getCurrentController(), UNO_QUERY_THROW);
+        xViewCursorSupplier->getViewCursor()->gotoEnd(false);
+
+        const CursorContext aContext = aController.getCursorContext();
+
+        // Well past one paragraph -- the old behaviour returned 4 -- and
+        // actually bounded at the budget, not merely "somewhere under 4000".
+        // The loose upper bound could not tell a cap from an overshoot.
+        CPPUNIT_ASSERT(aContext.textBefore.getLength() > 1000);
+        CPPUNIT_ASSERT_EQUAL(sal_Int32(2000), aContext.textBefore.getLength());
+    }
+
+    // GIVEN a document with paragraphs after the caret
+    // WHEN the caret is at the very start
+    // THEN textAfter reaches past the first paragraph break.
+    void testCursorContext_afterCrossesParagraphs()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDocument(mxComponent, UNO_QUERY_THROW);
+        Reference<text::XText> xText = xTextDocument->getText();
+        xText->insertString(xText->getEnd(), u"First para"_ustr, false);
+        xText->insertControlCharacter(xText->getEnd(), text::ControlCharacter::PARAGRAPH_BREAK,
+                                       false);
+        xText->insertString(xText->getEnd(), u"Second para"_ustr, false);
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        officelabs::DocumentController aController;
+        aController.setModel(xModel);
+        aController.setDocument(xTextDocument);
+
+        Reference<text::XTextViewCursorSupplier> xViewCursorSupplier(
+            xModel->getCurrentController(), UNO_QUERY_THROW);
+        xViewCursorSupplier->getViewCursor()->gotoStart(false);
+
+        const CursorContext aContext = aController.getCursorContext();
+
+        CPPUNIT_ASSERT(aContext.textAfter.startsWith(u"First para"_ustr));
+        CPPUNIT_ASSERT(aContext.textAfter.indexOf(u"Second para") >= 0);
     }
 
     // GIVEN a Writer document with the paragraph "The quick brown fox"
@@ -435,6 +514,8 @@ public:
     CPPUNIT_TEST(testCursorContext_afterFourChars);
     CPPUNIT_TEST(testCursorContext_atStart);
     CPPUNIT_TEST(testCursorContext_twoParagraphs);
+    CPPUNIT_TEST(testCursorContext_beforeStopsAtCharBudget);
+    CPPUNIT_TEST(testCursorContext_afterCrossesParagraphs);
     CPPUNIT_TEST(testCursorContext_selection);
     CPPUNIT_TEST(testInsertAtCursor_appendsText);
     CPPUNIT_TEST(testInsertAtCursor_undo);
