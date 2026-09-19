@@ -35,6 +35,7 @@
 #include <com/sun/star/text/XTextViewCursorSupplier.hpp>
 
 #include <officelabs/DocumentController.hxx>
+#include <officelabs/InlineCompletionEligibility.hxx>
 
 using namespace css;
 using namespace css::uno;
@@ -212,7 +213,7 @@ public:
     // GIVEN a document with paragraphs after the caret
     // WHEN the caret is at the very start
     // THEN textAfter reaches past the first paragraph break.
-    void testCursorContext_afterCrossesParagraphs()
+    void testCursorContext_afterStopsAtParagraphEnd()
     {
         loadFromURL(u"private:factory/swriter"_ustr);
         Reference<text::XTextDocument> xTextDocument(mxComponent, UNO_QUERY_THROW);
@@ -233,8 +234,13 @@ public:
 
         const CursorContext aContext = aController.getCursorContext();
 
+        // textAfter is PARAGRAPH-LOCAL and must stay that way: it is the
+        // eligibility gate, not a context budget. #75 asserted the opposite
+        // here -- that textAfter reached "Second para" -- and that is precisely
+        // what disabled ghost text everywhere except the end of the last
+        // non-blank paragraph. See testCursorContext_isEligibleMidDocument.
         CPPUNIT_ASSERT(aContext.textAfter.startsWith(u"First para"_ustr));
-        CPPUNIT_ASSERT(aContext.textAfter.indexOf(u"Second para") >= 0);
+        CPPUNIT_ASSERT_EQUAL(sal_Int32(-1), aContext.textAfter.indexOf(u"Second para"));
     }
 
     // GIVEN a Writer document with the paragraph "The quick brown fox"
@@ -509,14 +515,151 @@ public:
         CPPUNIT_ASSERT_EQUAL(float(18), aFont->heightPt);
     }
 
+
+    // GIVEN a caret at the end of a paragraph that has another paragraph below
+    // it WHEN the context is fed to the eligibility gate THEN a completion is
+    // still requested.
+    //
+    // This is the SEAM test. getCursorContext() and isEligible() each had their
+    // own suite and nothing called one into the other, so #75 could widen
+    // textAfter across paragraphs with 15/15 green while making isEligible --
+    // which returns textAfter.trim().isEmpty() -- false for every caret except
+    // the end of the last non-blank paragraph in the document.
+    void testCursorContext_isEligibleMidDocument()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDocument(mxComponent, UNO_QUERY_THROW);
+        Reference<text::XText> xText = xTextDocument->getText();
+        xText->insertString(xText->getEnd(), u"The quick brown fox jumps over"_ustr, false);
+        xText->insertControlCharacter(xText->getEnd(), text::ControlCharacter::PARAGRAPH_BREAK,
+                                       false);
+        xText->insertString(xText->getEnd(), u"Second para"_ustr, false);
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        officelabs::DocumentController aController;
+        aController.setModel(xModel);
+        aController.setDocument(xTextDocument);
+
+        // Caret at the END of the FIRST paragraph -- text follows, in a later
+        // paragraph. gotoStart then gotoEndOfParagraph, so this does not depend
+        // on how many paragraphs the document has.
+        Reference<text::XTextViewCursorSupplier> xViewCursorSupplier(
+            xModel->getCurrentController(), UNO_QUERY_THROW);
+        Reference<text::XTextViewCursor> xViewCursor = xViewCursorSupplier->getViewCursor();
+        xViewCursor->gotoStart(false);
+        // goRight by the first paragraph's length rather than XParagraphCursor:
+        // the VIEW cursor does not implement XParagraphCursor, and querying it
+        // throws.
+        xViewCursor->goRight(
+            static_cast<sal_Int16>(OUString(u"The quick brown fox jumps over"_ustr).getLength()),
+            false);
+
+        const CursorContext aContext = aController.getCursorContext();
+        CPPUNIT_ASSERT(aContext.textBefore.endsWith(u"jumps over"_ustr));
+        // The gate is what this test exists for.
+        CPPUNIT_ASSERT_EQUAL(OUString(), aContext.textAfter);
+        CPPUNIT_ASSERT(officelabs::isEligible(aContext));
+    }
+
+    // GIVEN the same caret -- end of a paragraph with another below it
+    // WHEN the forward context is read
+    // THEN it reaches the following paragraph AND the request body carries it,
+    // while textAfter stays empty and the context stays eligible.
+    //
+    // The companion to testCursorContext_isEligibleMidDocument above: that one
+    // pins that widening the GATE breaks the feature, this one pins that the
+    // trailing context still reaches the model. Asserting both in one test is
+    // the point -- they are the two halves that #75 could not satisfy at once,
+    // and a test that checks only one of them is what let it merge.
+    void testCursorContext_forwardContextReachesTheModel()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDocument(mxComponent, UNO_QUERY_THROW);
+        Reference<text::XText> xText = xTextDocument->getText();
+        xText->insertString(xText->getEnd(), u"The quick brown fox jumps over"_ustr, false);
+        xText->insertControlCharacter(xText->getEnd(), text::ControlCharacter::PARAGRAPH_BREAK,
+                                       false);
+        xText->insertString(xText->getEnd(), u"Second para"_ustr, false);
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        officelabs::DocumentController aController;
+        aController.setModel(xModel);
+        aController.setDocument(xTextDocument);
+
+        Reference<text::XTextViewCursorSupplier> xViewCursorSupplier(
+            xModel->getCurrentController(), UNO_QUERY_THROW);
+        Reference<text::XTextViewCursor> xViewCursor = xViewCursorSupplier->getViewCursor();
+        xViewCursor->gotoStart(false);
+        // goRight by the first paragraph's length, as the sibling test above
+        // does: the VIEW cursor does not implement XParagraphCursor.
+        CPPUNIT_ASSERT(xViewCursor->goRight(
+            static_cast<sal_Int16>(OUString(u"The quick brown fox jumps over"_ustr).getLength()),
+            false));
+
+        const CursorContext aContext = aController.getCursorContext();
+
+        // The gate is untouched by the widening.
+        CPPUNIT_ASSERT_EQUAL(OUString(), aContext.textAfter);
+        CPPUNIT_ASSERT(officelabs::isEligible(aContext));
+
+        // ...and the model gets the following paragraph, on the wire.
+        CPPUNIT_ASSERT(aContext.textAfterContext.indexOf(u"Second para") >= 0);
+        CPPUNIT_ASSERT(officelabs::buildCompletionRequest(aContext).indexOf("Second para") >= 0);
+    }
+
+    // GIVEN a document with more trailing text than the 500-character budget
+    // WHEN the forward context is read
+    // THEN it stops AT the budget rather than overshooting by a paragraph.
+    //
+    // An exact bound, not a range: "under 4000" could not tell a cap from an
+    // overshoot, and the loop stops BEFORE a hop that would exceed the budget,
+    // so the final hop can overshoot by a whole paragraph without the clip.
+    void testCursorContext_forwardContextStopsAtCharBudget()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDocument(mxComponent, UNO_QUERY_THROW);
+        Reference<text::XText> xText = xTextDocument->getText();
+        xText->insertString(xText->getEnd(), u"The quick brown fox jumps over"_ustr, false);
+        OUStringBuffer aFillBuf(100);
+        comphelper::string::padToLength(aFillBuf, 100, 'y');
+        const OUString aFill = aFillBuf.makeStringAndClear();
+        for (int i = 0; i < 20; ++i)
+        {
+            xText->insertControlCharacter(xText->getEnd(),
+                                          text::ControlCharacter::PARAGRAPH_BREAK, false);
+            xText->insertString(xText->getEnd(), aFill, false);
+        }
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        officelabs::DocumentController aController;
+        aController.setModel(xModel);
+        aController.setDocument(xTextDocument);
+
+        Reference<text::XTextViewCursorSupplier> xViewCursorSupplier(
+            xModel->getCurrentController(), UNO_QUERY_THROW);
+        Reference<text::XTextViewCursor> xViewCursor = xViewCursorSupplier->getViewCursor();
+        xViewCursor->gotoStart(false);
+        CPPUNIT_ASSERT(xViewCursor->goRight(
+            static_cast<sal_Int16>(OUString(u"The quick brown fox jumps over"_ustr).getLength()),
+            false));
+
+        const CursorContext aContext = aController.getCursorContext();
+
+        CPPUNIT_ASSERT_EQUAL(OUString(), aContext.textAfter);
+        CPPUNIT_ASSERT_EQUAL(sal_Int32(500), aContext.textAfterContext.getLength());
+    }
+
     CPPUNIT_TEST_SUITE(DocumentControllerCursorTest);
     CPPUNIT_TEST(testCursorContext_endOfParagraph);
     CPPUNIT_TEST(testCursorContext_afterFourChars);
     CPPUNIT_TEST(testCursorContext_atStart);
     CPPUNIT_TEST(testCursorContext_twoParagraphs);
     CPPUNIT_TEST(testCursorContext_beforeStopsAtCharBudget);
-    CPPUNIT_TEST(testCursorContext_afterCrossesParagraphs);
+    CPPUNIT_TEST(testCursorContext_afterStopsAtParagraphEnd);
     CPPUNIT_TEST(testCursorContext_selection);
+    CPPUNIT_TEST(testCursorContext_isEligibleMidDocument);
+    CPPUNIT_TEST(testCursorContext_forwardContextReachesTheModel);
+    CPPUNIT_TEST(testCursorContext_forwardContextStopsAtCharBudget);
     CPPUNIT_TEST(testInsertAtCursor_appendsText);
     CPPUNIT_TEST(testInsertAtCursor_undo);
     CPPUNIT_TEST(testInsertAtCursor_cursorAfterInsert);
