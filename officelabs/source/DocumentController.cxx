@@ -53,6 +53,18 @@ const sal_Int32 MAX_CONTEXT_AFTER_CHARS = 500;
 // never binds.
 const sal_Int32 MAX_CONTEXT_PARAGRAPH_HOPS = 64;
 
+/// Keep the last nChars (nearest the caret).
+OUString clipTail(const OUString& rText, sal_Int32 nChars)
+{
+    return rText.getLength() > nChars ? rText.copy(rText.getLength() - nChars) : rText;
+}
+
+/// Keep the first nChars (nearest the caret).
+OUString clipHead(const OUString& rText, sal_Int32 nChars)
+{
+    return rText.getLength() > nChars ? rText.copy(0, nChars) : rText;
+}
+
 } // anonymous namespace
 
 DocumentController::DocumentController()
@@ -443,7 +455,12 @@ CursorContext DocumentController::getCursorContext()
             if (!xParaBefore->gotoPreviousParagraph(true))
                 break;
         }
-        aContext.textBefore = xParaBefore->getString();
+        // Clip to the budget. The loop above stops *before* a hop that would
+        // exceed it, so the final hop can overshoot by a whole paragraph --
+        // 2000 was a threshold, not a bound. textBefore is additionally clipped
+        // downstream by InlineCompletionEligibility, but textAfter is not
+        // clipped anywhere, so doing it here is what actually bounds the wire.
+        aContext.textBefore = clipTail(xParaBefore->getString(), MAX_CONTEXT_BEFORE_CHARS);
 
         uno::Reference<text::XTextCursor> xAfter
             = xText->createTextCursorByRange(xViewCursor->getStart());
@@ -462,7 +479,7 @@ CursorContext DocumentController::getCursorContext()
                 break;
             xParaAfter->gotoEndOfParagraph(true);
         }
-        aContext.textAfter = xParaAfter->getString();
+        aContext.textAfter = clipHead(xParaAfter->getString(), MAX_CONTEXT_AFTER_CHARS);
 
         aContext.readOnly = false;
         if (m_xModel.is())

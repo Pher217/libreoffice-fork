@@ -202,9 +202,11 @@ public:
 
         const CursorContext aContext = aController.getCursorContext();
 
-        // Bounded, but well past one paragraph: the old behaviour returned 4.
+        // Well past one paragraph -- the old behaviour returned 4 -- and
+        // actually bounded at the budget, not merely "somewhere under 4000".
+        // The loose upper bound could not tell a cap from an overshoot.
         CPPUNIT_ASSERT(aContext.textBefore.getLength() > 1000);
-        CPPUNIT_ASSERT(aContext.textBefore.getLength() < 4000);
+        CPPUNIT_ASSERT_EQUAL(sal_Int32(2000), aContext.textBefore.getLength());
     }
 
     // GIVEN a document with paragraphs after the caret
