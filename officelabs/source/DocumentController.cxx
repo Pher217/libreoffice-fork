@@ -33,6 +33,40 @@ using namespace css;
 
 namespace officelabs {
 
+namespace {
+
+// How much document context getCursorContext() collects around the caret.
+//
+// Before this, it returned the current paragraph and nothing else, so a fact one
+// paragraph above the caret was invisible to inline completion no matter how
+// large the agent's own window was (officelabs-project#336). The agent-side cap
+// and InlineCompletionEligibility both clip to 2000 before anything is sent, so
+// collecting more than that here would be discarded downstream.
+const sal_Int32 MAX_CONTEXT_BEFORE_CHARS = 2000;
+const sal_Int32 MAX_CONTEXT_AFTER_CHARS = 500;
+
+// A hard bound on paragraph traversal, independent of the character budgets.
+// getCursorContext() runs on the VCL thread on every debounce (150 ms), so the
+// pathological document -- hundreds of one-character paragraphs, e.g. a long
+// list -- must not turn each keystroke into hundreds of UNO round trips. With
+// ordinary prose the character budget is reached in a handful of hops and this
+// never binds.
+const sal_Int32 MAX_CONTEXT_PARAGRAPH_HOPS = 64;
+
+/// Keep the last nChars (nearest the caret).
+OUString clipTail(const OUString& rText, sal_Int32 nChars)
+{
+    return rText.getLength() > nChars ? rText.copy(rText.getLength() - nChars) : rText;
+}
+
+/// Keep the first nChars (nearest the caret).
+OUString clipHead(const OUString& rText, sal_Int32 nChars)
+{
+    return rText.getLength() > nChars ? rText.copy(0, nChars) : rText;
+}
+
+} // anonymous namespace
+
 DocumentController::DocumentController()
 {
 }
@@ -410,7 +444,23 @@ CursorContext DocumentController::getCursorContext()
         if (!xParaBefore.is())
             return aContext;
         xParaBefore->gotoStartOfParagraph(true);
-        aContext.textBefore = xParaBefore->getString();
+        // Walk back across earlier paragraphs until the budget is met (#336).
+        // gotoPreviousParagraph(true) moves to the START of the previous
+        // paragraph and expands, so the selection already covers that whole
+        // paragraph -- no separate goto-end is needed on this side.
+        for (sal_Int32 nHops = 0; nHops < MAX_CONTEXT_PARAGRAPH_HOPS; ++nHops)
+        {
+            if (xParaBefore->getString().getLength() >= MAX_CONTEXT_BEFORE_CHARS)
+                break;
+            if (!xParaBefore->gotoPreviousParagraph(true))
+                break;
+        }
+        // Clip to the budget. The loop above stops *before* a hop that would
+        // exceed it, so the final hop can overshoot by a whole paragraph --
+        // 2000 was a threshold, not a bound. textBefore is additionally clipped
+        // downstream by InlineCompletionEligibility, but textAfter is not
+        // clipped anywhere, so doing it here is what actually bounds the wire.
+        aContext.textBefore = clipTail(xParaBefore->getString(), MAX_CONTEXT_BEFORE_CHARS);
 
         uno::Reference<text::XTextCursor> xAfter
             = xText->createTextCursorByRange(xViewCursor->getStart());
@@ -418,7 +468,18 @@ CursorContext DocumentController::getCursorContext()
         if (!xParaAfter.is())
             return aContext;
         xParaAfter->gotoEndOfParagraph(true);
-        aContext.textAfter = xParaAfter->getString();
+        // Same forward, with one difference: gotoNextParagraph(true) lands on
+        // the START of the next paragraph, so its text is only included once
+        // gotoEndOfParagraph(true) runs again.
+        for (sal_Int32 nHops = 0; nHops < MAX_CONTEXT_PARAGRAPH_HOPS; ++nHops)
+        {
+            if (xParaAfter->getString().getLength() >= MAX_CONTEXT_AFTER_CHARS)
+                break;
+            if (!xParaAfter->gotoNextParagraph(true))
+                break;
+            xParaAfter->gotoEndOfParagraph(true);
+        }
+        aContext.textAfter = clipHead(xParaAfter->getString(), MAX_CONTEXT_AFTER_CHARS);
 
         aContext.readOnly = false;
         if (m_xModel.is())
