@@ -99,11 +99,11 @@ jobs:
             "$(cat report.txt)" "$(cat registry.txt)" \
             "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
           existing=$(gh issue list -R Creative-Pandas-Sarl/officelabs-project \
-            --state open --label "area:build" --search "in:title upstream: LibreOffice refresh dry-run" \
+            --state open --label "area:fork" --search "in:title upstream: LibreOffice refresh dry-run" \
             --json number --jq '.[0].number' 2>/dev/null || true)
           if [ -n "$existing" ]; then
             gh issue comment "$existing" -R Creative-Pandas-Sarl/officelabs-project --body "$body"
           else
             gh issue create -R Creative-Pandas-Sarl/officelabs-project \
-              --title "$title" --body "$body" --label "area:build" --label "prio:P2"
+              --title "$title" --body "$body" --label "area:fork" --label "prio:P2"
           fi
