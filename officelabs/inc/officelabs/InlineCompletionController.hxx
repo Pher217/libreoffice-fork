@@ -163,6 +163,9 @@ private:
     // or cancelled, so recovery is a deadline rather than a cancellation: if a
     // reply has not landed by m_nInFlightDeadlineMs, the next requestNow()
     // abandons the request and issues a fresh one.
+    // Like m_bInFlight above, these three are written and read only on the VCL
+    // thread (requestNow, onResult); the detached fetch thread captures the
+    // generation by value and touches none of them, so they need no atomics.
     sal_uInt64 m_nInFlightTimeoutMs;
     sal_uInt64 m_nInFlightDeadlineMs;
     // Generation of the request currently occupying the in-flight slot. Only

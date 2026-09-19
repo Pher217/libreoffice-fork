@@ -368,6 +368,11 @@ void InlineCompletionController::requestNow()
                      << m_nInFlightTimeoutMs << " ms; abandoning the request");
         m_bInFlight = false;
         m_bRequestPending = false;
+        // Invalidate the slot's identity too, or a reply for the request just
+        // abandoned still matches m_nInFlightGeneration and is treated below as
+        // though someone were waiting for it. 0 never collides: m_nGeneration
+        // is pre-incremented, so a real request's generation starts at 1.
+        m_nInFlightGeneration = 0;
     }
 
     // One request at a time. Remember that this fire was suppressed: the timer

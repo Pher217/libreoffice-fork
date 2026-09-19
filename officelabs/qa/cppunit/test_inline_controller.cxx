@@ -15,6 +15,7 @@
 #include <cppunit/plugin/TestPlugIn.h>
 
 #include <atomic>
+#include <memory>
 #include <optional>
 
 #include <com/sun/star/awt/Key.hpp>
@@ -1166,12 +1167,17 @@ private:
         Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
         setTextAndGotoEnd(xTextDoc);
 
-        std::atomic<int> nCalls{ 0 };
-        std::atomic<bool> bRelease{ false };
+        // Gates are shared_ptr and captured BY VALUE, not by reference: the
+        // asserts below run before the fetcher is released, so a failing assert
+        // unwinds this frame while a detached thread is still spinning on them.
+        // A by-reference capture would leave that thread reading stack that has
+        // gone out of scope.
+        auto pCalls = std::make_shared<std::atomic<int>>(0);
+        auto pRelease = std::make_shared<std::atomic<bool>>(false);
         officelabs::InlineCompletionController::Fetcher aFetcher =
-            [&nCalls, &bRelease](const OString& /*rBody*/) {
-                ++nCalls;
-                while (!bRelease.load())
+            [pCalls, pRelease](const OString& /*rBody*/) {
+                ++*pCalls;
+                while (!pRelease->load())
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
                 return officelabs::InlineCompletionController::FetchResult{
                     200, R"({"suggestions":[{"text":" jumps"}]})"};
@@ -1185,20 +1191,22 @@ private:
                 makeCaretProvider(pEditWin), makeEnabledProvider()));
         xController->start();
         // Deadline expires the instant the request is issued, so the test does
-        // not have to wait out the real 10 s watchdog.
+        // not have to wait out the real 10 s watchdog. This cannot make the
+        // request abandon itself: the watchdog runs at the top of requestNow(),
+        // before the new request sets its own deadline.
         xController->setInFlightTimeoutMsForTest(0);
 
         xController->requestNow();
         CPPUNIT_ASSERT(xController->isInFlight());
-        CPPUNIT_ASSERT_EQUAL(1, nCalls.load());
+        CPPUNIT_ASSERT_EQUAL(1, pCalls->load());
 
         // Without the watchdog this fire is swallowed by the in-flight guard
         // and nCalls stays 1 for the rest of the session.
         xController->requestNow();
 
-        CPPUNIT_ASSERT_EQUAL(2, nCalls.load());
+        CPPUNIT_ASSERT_EQUAL(2, pCalls->load());
 
-        bRelease = true;
+        *pRelease = true;
         drainUntilIdle(xController.get());
         xController->dispose();
     }
@@ -1213,13 +1221,14 @@ private:
         Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
         setTextAndGotoEnd(xTextDoc);
 
-        std::atomic<int> nCalls{ 0 };
-        std::atomic<bool> bReleaseFirst{ false };
-        std::atomic<bool> bReleaseSecond{ false };
+        // Shared, captured by value -- see the note in the test above.
+        auto pCalls = std::make_shared<std::atomic<int>>(0);
+        auto pReleaseFirst = std::make_shared<std::atomic<bool>>(false);
+        auto pReleaseSecond = std::make_shared<std::atomic<bool>>(false);
         officelabs::InlineCompletionController::Fetcher aFetcher =
-            [&nCalls, &bReleaseFirst, &bReleaseSecond](const OString& /*rBody*/) {
-                const int nMine = ++nCalls;
-                std::atomic<bool>& rGate = (nMine == 1) ? bReleaseFirst : bReleaseSecond;
+            [pCalls, pReleaseFirst, pReleaseSecond](const OString& /*rBody*/) {
+                const int nMine = ++*pCalls;
+                std::atomic<bool>& rGate = (nMine == 1) ? *pReleaseFirst : *pReleaseSecond;
                 while (!rGate.load())
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
                 return officelabs::InlineCompletionController::FetchResult{
@@ -1237,11 +1246,11 @@ private:
 
         xController->requestNow();          // generation A, never returns yet
         xController->requestNow();          // watchdog abandons A, issues B
-        CPPUNIT_ASSERT_EQUAL(2, nCalls.load());
+        CPPUNIT_ASSERT_EQUAL(2, pCalls->load());
         CPPUNIT_ASSERT(xController->isInFlight());
 
         // A returns late. Its reply carries the abandoned generation.
-        bReleaseFirst = true;
+        *pReleaseFirst = true;
         for (int i = 0; i < 40; ++i)
         {
             Scheduler::ProcessEventsToIdle();
@@ -1251,7 +1260,7 @@ private:
         // B still owns the slot.
         CPPUNIT_ASSERT(xController->isInFlight());
 
-        bReleaseSecond = true;
+        *pReleaseSecond = true;
         drainUntilIdle(xController.get());
         CPPUNIT_ASSERT(!xController->isInFlight());
 
