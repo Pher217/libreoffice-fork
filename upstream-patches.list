@@ -1,0 +1,151 @@
+# OfficeLabs patch registry — every upstream LibreOffice file this fork modifies or deletes.
+#
+# WHY THIS FILE EXISTS
+# The 2026-02 upstream refresh cost weeks, not because merging was hard, but because
+# nobody could say what "ours" was: the fork is a full LibreOffice tree with our commits
+# merged into upstream history, so "what did we change" was a research project every time.
+# This file is that answer, checked in and enforced. `./upstream-sync.sh registry` fails
+# a PR that patches an upstream file not listed here, so the list cannot silently rot.
+#
+# NOT LISTED HERE, ON PURPOSE:
+#   officelabs/**        our own module, added wholesale — it can never conflict.
+#                        Source of truth is officelabs-core; see CLAUDE.md.
+#   *.png *.ico *.icns *.svg   branding binaries. Always resolve "ours"; never a text conflict.
+#   files we ADD under an upstream directory (distro-configs/OfficeLabs*.conf,
+#                        include/vcl/officelabs/, sfx2/inc/sidebar/OfficelabsTheme.hxx, …)
+#                        — an added file has no upstream side to conflict with.
+#
+# base: e8c17d8aec8e103d5353cd83d3d08323510ac83a   (upstream commit this fork last merged,
+#        2026-02-22, upstream master. Update it when a refresh lands. Used by
+#        `registry` when no upstream ref has been fetched — e.g. in CI.)
+#
+# Format: one path per line. Blank lines and # comments ignored.
+# Regenerate with: ./upstream-sync.sh registry --write
+
+## --- Deleted upstream content ------------------------------------------------
+# Submodules and helpers we do not ship. Every upstream refresh re-raises these as
+# modify/delete conflicts; the resolution is always "keep ours" (stay deleted).
+dictionaries
+helpcontent2
+translations
+g
+.gitmodules
+
+## --- Build configuration ------------------------------------------------------
+# OfficeLabs identity, the CEF/officelabs module registration, and Windows/macOS
+# toolchain fixes. configure.ac + Repository*.mk are where the officelabs module
+# enters the build; expect small, mechanical conflicts here on every refresh.
+.gitattributes
+.gitignore
+Repository.mk
+RepositoryExternal.mk
+RepositoryModule_host.mk
+config_host.mk.in
+configure.ac
+sanitize-ubsan-excludelist
+solenv/bin/modules/installer/simplepackage.pm
+solenv/bin/ooinstall
+solenv/gbuild/Gallery.mk
+solenv/gcc-wrappers/wrapper.cxx
+
+## --- Third-party build fixes ---------------------------------------------------
+# Local workarounds for building externals under our toolchain. HIGHEST CHURN AREA:
+# upstream rewrites these freely and our one-line edits conflict often. When one
+# conflicts, prefer upstream wholesale and re-test — do not hand-merge a workaround
+# that upstream may already have fixed.
+external/boost/UnpackedTarball_boost.mk
+external/fast_float/UnpackedTarball_fast_float.mk
+external/frozen/UnpackedTarball_frozen.mk
+external/glm/UnpackedTarball_glm.mk
+external/glm/clang-cl.patch.0
+external/gpgmepp/ExternalProject_gpgmepp.mk
+external/gpgmepp/Library_gpgmepp.mk
+external/harfbuzz/ExternalProject_harfbuzz.mk
+external/lcms2/UnpackedTarball_lcms2.mk
+external/libassuan/ExternalPackage_libassuan.mk
+external/libassuan/ExternalProject_libassuan.mk
+external/libgpg-error/ExternalPackage_libgpg-error.mk
+external/libgpg-error/ExternalProject_libgpg-error.mk
+external/libjpeg-turbo/jconfigint.h
+external/libxml2/ExternalProject_libxml2.mk
+external/libxslt/ExternalProject_libxslt.mk
+external/lpsolve/UnpackedTarball_lpsolve.mk
+external/openssl/ExternalProject_openssl.mk
+external/openssl/configurable-z-option.patch.0
+external/redland/UnpackedTarball_redland.mk
+external/redland/redland/clang-cl.patch
+external/xmlsec/ExternalProject_xmlsec.mk
+extensions/Library_oleautobridge.mk
+extensions/Library_so_activex.mk
+
+## --- Branding and installer ----------------------------------------------------
+# App name, bundle id, icons, start center, installer metadata.
+desktop/WinResTarget_sofficebin.mk
+desktop/util/officeloader.rc
+instsetoo_native/CustomTarget_install.mk
+instsetoo_native/util/openoffice.lst.in
+sfx2/source/dialog/backingwindow.cxx
+sfx2/uiconfig/ui/startcenter.ui
+framework/source/helper/titlebarupdate.cxx
+shell/source/win32/jumplist/JumpList.cxx
+
+## --- Sidebar / AI deck integration ---------------------------------------------
+# THE LOAD-BEARING PATCH SET. This is what makes the OfficeLabs deck exist, theme
+# itself, and stay the active panel. Upstream refactors sfx2/source/sidebar/ most
+# releases, so these are the conflicts that need a human who knows the feature.
+# A refresh that resolves these by "take upstream" silently removes the product.
+officecfg/registry/data/org/openoffice/Office/UI/Sidebar.xcu
+officecfg/registry/data/org/openoffice/Office/UI/ToolbarMode.xcu
+officecfg/registry/data/org/openoffice/Office/Accelerators.xcu
+officecfg/registry/data/org/openoffice/Office/UI/WriterCommands.xcu
+officecfg/registry/schema/org/openoffice/Office/Common.xcs
+officecfg/registry/schema/org/openoffice/Office/Writer.xcs
+include/sfx2/sfxsids.hrc
+sfx2/Module_sfx2.mk
+sfx2/source/appl/appinit.cxx
+sfx2/source/notebookbar/NotebookbarTabControl.cxx
+sfx2/source/sidebar/Deck.cxx
+sfx2/source/sidebar/DeckTitleBar.cxx
+sfx2/source/sidebar/Panel.cxx
+sfx2/source/sidebar/SidebarChildWindow.cxx
+sfx2/source/sidebar/SidebarDockingWindow.cxx
+sfx2/source/sidebar/TabBar.cxx
+sfx2/source/sidebar/Theme.cxx
+sfx2/source/sidebar/TitleBar.cxx
+sc/Library_sc.mk
+sc/source/ui/sidebar/ScPanelFactory.cxx
+sd/Library_sd.mk
+sd/source/ui/sidebar/PanelFactory.cxx
+sw/Library_sw.mk
+sw/source/uibase/sidebar/SwPanelFactory.cxx
+sw/source/uibase/sidebar/ThemePanel.cxx
+svx/source/sidebar/line/LineWidthValueSet.cxx
+
+## --- Inline ghost text (Writer) -------------------------------------------------
+sw/source/uibase/docvw/edtwin.cxx
+
+## --- VCL: theming, CEF host window, platform fixes -------------------------------
+# The OfficeLabs widget theme and the native-window work the CEF sidebar needs.
+# vcl/win/app/salinst.cxx is the single riskiest file in the fork: upstream reworks
+# the Windows message loop, and our CEF pump lives inside it.
+include/vcl/tabctrl.hxx
+include/sal/log-areas.dox
+vcl/Module_vcl.mk
+vcl/Package_theme_definitions.mk
+vcl/source/app/salvtables.cxx
+vcl/source/control/button.cxx
+vcl/source/control/tabctrl.cxx
+vcl/source/treelist/iconview.cxx
+vcl/source/window/decoview.cxx
+vcl/source/window/status.cxx
+vcl/source/window/window.cxx
+vcl/osx/vclnsapp.mm
+vcl/win/app/salinst.cxx
+vcl/win/gdi/salgdi.cxx
+vcl/win/window/salframe.cxx
+svtools/source/control/ruler.cxx
+svx/source/tbxctrls/StylesPreviewWindow.cxx
+
+## --- App startup -----------------------------------------------------------------
+desktop/source/app/app.cxx
+desktop/source/app/appinit.cxx

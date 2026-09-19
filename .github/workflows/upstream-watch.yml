@@ -1,0 +1,109 @@
+name: upstream watch
+
+# Answers one question on a schedule: if we merged today's LibreOffice release,
+# what would break? Nothing here builds anything — a green run does NOT mean the
+# fork still compiles, and the job says so in its own output.
+#
+# WHY MONTHLY AND NOT PER-PR: the useful check needs upstream history, which is a
+# multi-GB fetch. Per-PR that cost buys nothing (a PR does not move upstream); once
+# a month it turns "a full major version behind, conflicts unknown" into a standing
+# number. The 2026-02 refresh was expensive because it was the first measurement in
+# months, not because the merge was hard.
+#
+# WHERE THE REPORT GOES: NOT an issue in this repo. This fork still carries
+# upstream's .github/workflows/lockdown.yml (repo-lockdown), which auto-closes and
+# comments on every issue opened here — a watcher filing here would close its own
+# report. With UPSTREAM_WATCH_TOKEN set, the report is filed against
+# officelabs-project instead; without it, the run fails so the scheduled-failure
+# mail is the signal, and the detail is in the run summary.
+on:
+  schedule:
+    - cron: "17 6 1 * *"   # 06:17 UTC on the 1st. Off-peak: GitHub drops cron runs at busy times.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Upstream tag to test against. Empty = newest release."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # merge-base needs our real history, not a shallow tip
+          filter: blob:none       # ~10x faster on a tree this size; blobs fetched on demand
+          submodules: false
+
+      - name: Registry drift
+        id: registry
+        run: |
+          set +e
+          ./upstream-sync.sh registry | tee registry.txt
+          echo "rc=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Conflict dry-run
+        id: report
+        run: |
+          set +e
+          ./upstream-sync.sh report ${{ inputs.tag }} | tee report.txt
+          echo "rc=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        run: |
+          {
+            echo "## Upstream refresh dry-run"
+            echo
+            echo '```'
+            cat report.txt
+            echo '```'
+            echo
+            echo "### Patch registry"
+            echo '```'
+            cat registry.txt
+            echo '```'
+            echo
+            echo "A clean dry-run means the MERGE is mechanical. It says nothing about"
+            echo "whether the fork still builds or whether the sidebar still works —"
+            echo "those need a real build on both platforms. See CLAUDE.md."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: File the report
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.UPSTREAM_WATCH_TOKEN }}
+          REG_RC: ${{ steps.registry.outputs.rc }}
+          REP_RC: ${{ steps.report.outputs.rc }}
+        run: |
+          # rc 0 clean · 1 behind/conflicts · 2 registry drift · 3 error
+          if [ "$REG_RC" = "0" ] && [ "$REP_RC" = "0" ]; then
+            echo "Up to date and conflict-free; nothing to file."; exit 0
+          fi
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::UPSTREAM_WATCH_TOKEN not set — report is in the run summary only."
+            echo "Failing so the scheduled-run failure mail carries the signal."
+            exit 1
+          fi
+          title="upstream: LibreOffice refresh dry-run $(date -u +%Y-%m)"
+          body=$(printf '%s\n\n```\n%s\n```\n\n```\n%s\n```\n\n[run](%s)\n' \
+            "Automated monthly dry-run from libreoffice-fork. The merge is mechanical or not; the build is unverified either way." \
+            "$(cat report.txt)" "$(cat registry.txt)" \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
+          existing=$(gh issue list -R Creative-Pandas-Sarl/officelabs-project \
+            --state open --label "area:fork" --search "in:title upstream: LibreOffice refresh dry-run" \
+            --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" -R Creative-Pandas-Sarl/officelabs-project --body "$body"
+          else
+            gh issue create -R Creative-Pandas-Sarl/officelabs-project \
+              --title "$title" --body "$body" --label "area:fork" --label "prio:P2"
+          fi
