@@ -314,10 +314,17 @@ public:
             xModel->getCurrentController(), UNO_QUERY_THROW);
         Reference<text::XTextViewCursor> xViewCursor = xViewCursorSupplier->getViewCursor();
         xViewCursor->gotoStart(false);
-        CPPUNIT_ASSERT(xViewCursor->goRight(15, false));
+        // 16, not 15: "First paragraph here" has its space at index 15, so
+        // goRight(15) would leave " here" and this assertion would fail on a
+        // correct implementation. goRight counts characters including spaces --
+        // pinned by testCursorContext_afterFourChars above.
+        CPPUNIT_ASSERT(xViewCursor->goRight(16, false));
 
         const CursorContext aContext = aController.getCursorContext();
 
+        // textBefore is 16 chars, comfortably over the 10-char minimum, so the
+        // ineligibility below is caused by textAfter and by nothing else.
+        CPPUNIT_ASSERT_EQUAL(u"First paragraph "_ustr, aContext.textBefore);
         CPPUNIT_ASSERT_EQUAL(u"here"_ustr, aContext.textAfter);
         CPPUNIT_ASSERT(!officelabs::isEligible(aContext));
     }

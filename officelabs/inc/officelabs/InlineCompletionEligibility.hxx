@@ -33,8 +33,9 @@ namespace officelabs {
 ///    paragraphs. That is @p textAfterContext, and it only goes on the wire.
 ///
 /// Collapsing the two is a live defect, not a style point: gating on the wide
-/// field makes every paragraph but the document's last one ineligible, because
-/// a following paragraph is never whitespace-only
+/// field leaves only the document's last non-blank paragraph eligible, because
+/// any following paragraph that has text in it makes the whole forward window
+/// non-whitespace
 /// ([fork#75](https://github.com/Pher217/libreoffice-fork/pull/75)).
 ///
 /// @p textAfterContext is declared last so that an aggregate initialiser that
