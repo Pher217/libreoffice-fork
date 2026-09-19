@@ -479,6 +479,27 @@ CursorContext DocumentController::getCursorContext()
         // trailing context, add a SEPARATE field and leave this one alone.
         aContext.textAfter = clipHead(xParaAfter->getString(), MAX_CONTEXT_AFTER_CHARS);
 
+        // ...and here is that separate field. Keep walking the SAME cursor
+        // forward -- textAfter has already been taken, so nothing above can be
+        // affected by how far this goes. gotoNextParagraph(true) lands on the
+        // START of the next paragraph, so its text is only included once
+        // gotoEndOfParagraph(true) runs again.
+        //
+        // The hop bound is independent of the character budget: this runs on
+        // the VCL thread on every 150 ms debounce, and a document of hundreds
+        // of one-character paragraphs must not turn a keystroke into hundreds
+        // of UNO round trips. Clipped here because nothing downstream bounds it.
+        for (sal_Int32 nHops = 0; nHops < MAX_CONTEXT_PARAGRAPH_HOPS; ++nHops)
+        {
+            if (xParaAfter->getString().getLength() >= MAX_CONTEXT_AFTER_CHARS)
+                break;
+            if (!xParaAfter->gotoNextParagraph(true))
+                break;
+            xParaAfter->gotoEndOfParagraph(true);
+        }
+        aContext.textAfterContext
+            = clipHead(xParaAfter->getString(), MAX_CONTEXT_AFTER_CHARS);
+
         aContext.readOnly = false;
         if (m_xModel.is())
         {

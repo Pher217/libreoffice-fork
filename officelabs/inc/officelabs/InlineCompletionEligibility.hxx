@@ -26,6 +26,22 @@ struct CursorContext
     OUString textAfter;
     bool hasSelection = false;
     bool readOnly = false;
+    /// Text FOLLOWING the caret, reaching across paragraphs -- what the model
+    /// conditions on. Read only by buildCompletionRequest(); the gate never
+    /// sees it.
+    ///
+    /// This exists because the two questions asked after the caret are not the
+    /// same question. "May I complete here?" is paragraph-local and is
+    /// @p textAfter. "What follows, for the model?" is not, and putting it in
+    /// @p textAfter is what disabled ghost text everywhere but the document's
+    /// last non-blank paragraph (fork#75, fixed by fork#78 -- whose comment in
+    /// DocumentController.cxx asks for exactly this separate field).
+    ///
+    /// Declared LAST on purpose. Every existing 4-element aggregate initialiser
+    /// still compiles and leaves this empty, which costs the model context.
+    /// Ordering it before the bools would leave the *gate* empty instead and
+    /// fire ghost text mid-paragraph -- so the forgetful caller fails safe.
+    OUString textAfterContext;
 };
 
 /// True iff a completion should be requested for this context: no selection,
@@ -51,6 +67,12 @@ OFFICELABS_DLLPUBLIC bool isInlineCompletionEnabledValue(std::string_view aFileC
 
 /// Builds the JSON body for POST /completions/: text_before (capped to its
 /// last 2000 characters), text_after, mode and max_suggestions.
+///
+/// text_after comes from @p textAfterContext, not @p textAfter. Reading the
+/// gate field here would always put a whitespace-only string on the wire,
+/// because isEligible() has just required exactly that of it -- which is why
+/// the agent never saw trailing context before this field existed
+/// (officelabs-agent#336).
 OFFICELABS_DLLPUBLIC OString buildCompletionRequest(const CursorContext& rContext);
 
 /// Reads suggestions[0].text from a completion response body. Returns an
