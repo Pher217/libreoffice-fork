@@ -98,6 +98,9 @@ public:
     const OUString& ghostText() const { return m_sSuggestion; }
     OUString pendingSuggestion() const { return m_pGhost && m_pGhost->isShowing() ? m_sSuggestion : OUString(); }
     bool isInFlight() const { return m_bInFlight; }
+    /// Shorten the hung-fetcher watchdog so a test does not have to wait out
+    /// the real deadline. Test-only; production never changes it.
+    void setInFlightTimeoutMsForTest(sal_uInt64 nMs) { m_nInFlightTimeoutMs = nMs; }
     OUString ghostFontFamily() const { return m_pGhost ? m_pGhost->GetFont().GetFamilyName() : OUString(); }
     tools::Long ghostFontHeight() const { return m_pGhost ? m_pGhost->GetFont().GetFontHeight() : 0; }
     tools::Long ghostTextHeight() const { return m_pGhost ? m_pGhost->GetTextHeight() : 0; }
@@ -155,6 +158,21 @@ private:
 
     int m_nFailures;
     sal_uInt64 m_nBackoffUntilMs;
+
+    // Hung-fetcher watchdog. The fetch thread is detached and cannot be joined
+    // or cancelled, so recovery is a deadline rather than a cancellation: if a
+    // reply has not landed by m_nInFlightDeadlineMs, the next requestNow()
+    // abandons the request and issues a fresh one.
+    // Like m_bInFlight above, these three are written and read only on the VCL
+    // thread (requestNow, onResult); the detached fetch thread captures the
+    // generation by value and touches none of them, so they need no atomics.
+    sal_uInt64 m_nInFlightTimeoutMs;
+    sal_uInt64 m_nInFlightDeadlineMs;
+    // Generation of the request currently occupying the in-flight slot. Only
+    // that request's reply may release the slot: m_nGeneration is bumped by
+    // every keystroke, so it cannot identify which request a reply belongs to,
+    // and an abandoned request that returns late must not free a newer one.
+    sal_uInt64 m_nInFlightGeneration;
 
     CursorContext m_aRequested;
     /// Context the user dismissed with Escape; no new request until the text

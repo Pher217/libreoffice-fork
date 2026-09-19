@@ -15,6 +15,7 @@
 #include <cppunit/plugin/TestPlugIn.h>
 
 #include <atomic>
+#include <memory>
 #include <optional>
 
 #include <com/sun/star/awt/Key.hpp>
@@ -1156,6 +1157,116 @@ private:
         xController->dispose();
     }
 
+    // GIVEN a fetcher that never returns, so the in-flight slot is held
+    // indefinitely, WHEN the watchdog deadline has passed, THEN a later
+    // requestNow() abandons the stranded request and issues a fresh one
+    // instead of returning early at the in-flight guard (project#228).
+    void testHungFetcherDoesNotStrandInFlight()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        // Gates are shared_ptr and captured BY VALUE, not by reference: the
+        // asserts below run before the fetcher is released, so a failing assert
+        // unwinds this frame while a detached thread is still spinning on them.
+        // A by-reference capture would leave that thread reading stack that has
+        // gone out of scope.
+        auto pCalls = std::make_shared<std::atomic<int>>(0);
+        auto pRelease = std::make_shared<std::atomic<bool>>(false);
+        officelabs::InlineCompletionController::Fetcher aFetcher =
+            [pCalls, pRelease](const OString& /*rBody*/) {
+                ++*pCalls;
+                while (!pRelease->load())
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                return officelabs::InlineCompletionController::FetchResult{
+                    200, R"({"suggestions":[{"text":" jumps"}]})"};
+            };
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        vcl::Window* pEditWin = getEditWindow();
+        rtl::Reference<officelabs::InlineCompletionController> xController(
+            new officelabs::InlineCompletionController(
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin), makeEnabledProvider()));
+        xController->start();
+        // Deadline expires the instant the request is issued, so the test does
+        // not have to wait out the real 10 s watchdog. This cannot make the
+        // request abandon itself: the watchdog runs at the top of requestNow(),
+        // before the new request sets its own deadline.
+        xController->setInFlightTimeoutMsForTest(0);
+
+        xController->requestNow();
+        CPPUNIT_ASSERT(xController->isInFlight());
+        CPPUNIT_ASSERT_EQUAL(1, pCalls->load());
+
+        // Without the watchdog this fire is swallowed by the in-flight guard
+        // and nCalls stays 1 for the rest of the session.
+        xController->requestNow();
+
+        CPPUNIT_ASSERT_EQUAL(2, pCalls->load());
+
+        *pRelease = true;
+        drainUntilIdle(xController.get());
+        xController->dispose();
+    }
+
+    // GIVEN the watchdog abandoned a request and a newer one now holds the
+    // slot, WHEN the abandoned request finally returns, THEN its reply must not
+    // release the newer request's slot -- otherwise the watchdog fix would
+    // itself allow two fetches in flight at once (project#228).
+    void testAbandonedReplyDoesNotReleaseNewerRequest()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        // Shared, captured by value -- see the note in the test above.
+        auto pCalls = std::make_shared<std::atomic<int>>(0);
+        auto pReleaseFirst = std::make_shared<std::atomic<bool>>(false);
+        auto pReleaseSecond = std::make_shared<std::atomic<bool>>(false);
+        officelabs::InlineCompletionController::Fetcher aFetcher =
+            [pCalls, pReleaseFirst, pReleaseSecond](const OString& /*rBody*/) {
+                const int nMine = ++*pCalls;
+                std::atomic<bool>& rGate = (nMine == 1) ? *pReleaseFirst : *pReleaseSecond;
+                while (!rGate.load())
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                return officelabs::InlineCompletionController::FetchResult{
+                    200, R"({"suggestions":[{"text":" jumps"}]})"};
+            };
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        vcl::Window* pEditWin = getEditWindow();
+        rtl::Reference<officelabs::InlineCompletionController> xController(
+            new officelabs::InlineCompletionController(
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin), makeEnabledProvider()));
+        xController->start();
+        xController->setInFlightTimeoutMsForTest(0);
+
+        xController->requestNow();          // generation A, never returns yet
+        xController->requestNow();          // watchdog abandons A, issues B
+        CPPUNIT_ASSERT_EQUAL(2, pCalls->load());
+        CPPUNIT_ASSERT(xController->isInFlight());
+
+        // A returns late. Its reply carries the abandoned generation.
+        *pReleaseFirst = true;
+        for (int i = 0; i < 40; ++i)
+        {
+            Scheduler::ProcessEventsToIdle();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+
+        // B still owns the slot.
+        CPPUNIT_ASSERT(xController->isInFlight());
+
+        *pReleaseSecond = true;
+        drainUntilIdle(xController.get());
+        CPPUNIT_ASSERT(!xController->isInFlight());
+
+        xController->dispose();
+    }
+
     CPPUNIT_TEST_SUITE(InlineCompletionControllerTest);
     CPPUNIT_TEST(testAcceptSuggestion);
     CPPUNIT_TEST(testTabAcceptsSuggestion);
@@ -1186,6 +1297,8 @@ private:
     CPPUNIT_TEST(testNonMatchingCharacterDismissesGhost);
     CPPUNIT_TEST(testTabWhileTypeThroughPendingDoesNotInsert);
     CPPUNIT_TEST(testTypeThroughGuardFailureHidesGhostAndRearmsDebounce);
+    CPPUNIT_TEST(testHungFetcherDoesNotStrandInFlight);
+    CPPUNIT_TEST(testAbandonedReplyDoesNotReleaseNewerRequest);
     CPPUNIT_TEST_SUITE_END();
 };
 

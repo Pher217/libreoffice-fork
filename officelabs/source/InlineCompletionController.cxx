@@ -48,6 +48,13 @@ namespace {
 
 const sal_Int32 COMPLETION_TIMEOUT_SECONDS = 3;
 
+// Hung-fetcher watchdog, deliberately far above COMPLETION_TIMEOUT_SECONDS so a
+// merely slow reply is never abandoned -- this fires only when the fetcher is
+// wedged *outside* its own HTTP timeout (a socket that never returns, a DNS
+// stall, a blocked bridge thread), which is the case that used to kill inline
+// completion for the whole session (project#228).
+const sal_uInt64 INFLIGHT_WATCHDOG_MS = 10000;
+
 void runOnVclThread(void* pData, void*)
 {
     std::unique_ptr<std::function<void()>> pFn(static_cast<std::function<void()>*>(pData));
@@ -91,6 +98,9 @@ InlineCompletionController::InlineCompletionController(
     , m_bTypeThroughPending(false)
     , m_nFailures(0)
     , m_nBackoffUntilMs(0)
+    , m_nInFlightTimeoutMs(INFLIGHT_WATCHDOG_MS)
+    , m_nInFlightDeadlineMs(0)
+    , m_nInFlightGeneration(0)
 {
     m_aDoc.setModel(xModel);
     m_aDoc.setController(xController);
@@ -342,6 +352,29 @@ void InlineCompletionController::requestNow()
         return;
     }
 
+    const sal_uInt64 nNow = tools::Time::GetSystemTicks();
+
+    // Watchdog, before the in-flight guard below: a fetcher that never returns
+    // would otherwise hold the slot forever and turn every later fire into the
+    // early return -- inline completion silently dead for the rest of the
+    // session, with both flags stuck set, since onResult() is the only place
+    // either is cleared (project#228). The thread is detached and cannot be
+    // cancelled, so what is abandoned is the slot, not the request; the late
+    // reply is then ignored by the identity check in onResult().
+    if (m_bInFlight && nNow >= m_nInFlightDeadlineMs)
+    {
+        SAL_WARN("officelabs",
+                 "inline completion: fetcher did not return within "
+                     << m_nInFlightTimeoutMs << " ms; abandoning the request");
+        m_bInFlight = false;
+        m_bRequestPending = false;
+        // Invalidate the slot's identity too, or a reply for the request just
+        // abandoned still matches m_nInFlightGeneration and is treated below as
+        // though someone were waiting for it. 0 never collides: m_nGeneration
+        // is pre-incremented, so a real request's generation starts at 1.
+        m_nInFlightGeneration = 0;
+    }
+
     // One request at a time. Remember that this fire was suppressed: the timer
     // is one-shot and only keyReleased re-arms it, so a user who stops typing
     // while a request is in flight would otherwise never get a request for the
@@ -353,7 +386,6 @@ void InlineCompletionController::requestNow()
         return;
     }
 
-    const sal_uInt64 nNow = tools::Time::GetSystemTicks();
     if (nNow < m_nBackoffUntilMs)
         return;
 
@@ -371,6 +403,8 @@ void InlineCompletionController::requestNow()
     m_aRequested = c;
     m_bInFlight = true;
     const sal_uInt64 nGen = ++m_nGeneration;
+    m_nInFlightGeneration = nGen;
+    m_nInFlightDeadlineMs = nNow + m_nInFlightTimeoutMs;
     const OString sBody = buildCompletionRequest(c);
 
     std::thread([pShared = m_pShared, aFetcher = m_aFetcher, sBody, nGen]() {
@@ -387,14 +421,23 @@ void InlineCompletionController::requestNow()
 
 void InlineCompletionController::onResult(sal_uInt64 nGeneration, const FetchResult& rResult)
 {
-    m_bInFlight = false;
-
-    // Re-arm for text typed while this request was in flight. Done first, so it
-    // happens on every path below -- most of which drop the result.
-    if (m_bRequestPending)
+    // Only the reply for the request that actually holds the slot may release
+    // it. m_nGeneration is bumped by every keystroke, so it identifies staleness
+    // (checked further down) and not identity: without this, a request the
+    // watchdog already abandoned could return late and free the slot belonging
+    // to the newer request that replaced it, putting two fetches in flight at
+    // once (project#228).
+    if (nGeneration == m_nInFlightGeneration)
     {
-        m_bRequestPending = false;
-        m_aTimer.Start();
+        m_bInFlight = false;
+
+        // Re-arm for text typed while this request was in flight. Done first, so
+        // it happens on every path below -- most of which drop the result.
+        if (m_bRequestPending)
+        {
+            m_bRequestPending = false;
+            m_aTimer.Start();
+        }
     }
 
     if (rResult.nStatus != 200)
