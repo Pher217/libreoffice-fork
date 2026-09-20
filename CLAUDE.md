@@ -137,6 +137,10 @@ with a reason *before* resolving it.
 
 ### The procedure
 
+Driven end to end by **`/upstream-refresh`** (`.claude/skills/upstream-refresh/SKILL.md`), which
+owns the halt conditions, the two-machine handoff and the headed-verification checklist. The steps
+below are what it follows.
+
 1. `./upstream-sync.sh report <tag>` — get the conflict set, and resolve any undeclared entries
    into `upstream-patches.list` first.
 2. Worktree off `master`, `git merge refs/upstream/<tag>`.

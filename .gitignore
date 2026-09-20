@@ -209,8 +209,13 @@ config_host-*.mk
 # gcc-wrapper build artifacts
 solenv/gcc-wrappers/*.obj
 
-# Claude Code workspace state (worktrees, session scratch)
-.claude/
+# Claude Code workspace state. Session scratch: worktrees, local settings, transcripts. Everything under
+# .claude/ is ignored EXCEPT skills -- those are repo config the harness
+# auto-loads, so they belong in git like CLAUDE.md does. A bare `.claude/`
+# rule cannot be negated from inside (git does not descend into an excluded
+# directory), hence the /* form.
+.claude/*
+!.claude/skills/
 
 # graphify build output — canonical home is ~/dev/Graphify/{Project}/{repo}/
 graphify-out/
