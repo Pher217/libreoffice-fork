@@ -373,6 +373,14 @@ void InlineCompletionController::requestNow()
         // though someone were waiting for it. 0 never collides: m_nGeneration
         // is pre-incremented, so a real request's generation starts at 1.
         m_nInFlightGeneration = 0;
+
+        // The watchdog giving up IS the failure (project#234): it is
+        // unambiguous evidence attributable to the right request at the right
+        // time, unlike whatever the request's reply says if it ever lands.
+        // onResult() ignores that reply entirely once it is no longer the
+        // slot owner, so this is the only place an abandoned request is
+        // counted -- never twice, never masked by a late 200.
+        noteFailure();
     }
 
     // One request at a time. Remember that this fire was suppressed: the timer
@@ -419,6 +427,16 @@ void InlineCompletionController::requestNow()
     }).detach();
 }
 
+void InlineCompletionController::noteFailure()
+{
+    ++m_nFailures;
+    if (m_nFailures >= 3)
+    {
+        m_nBackoffUntilMs = tools::Time::GetSystemTicks() + 30000;
+        m_nFailures = 0;
+    }
+}
+
 void InlineCompletionController::onResult(sal_uInt64 nGeneration, const FetchResult& rResult)
 {
     // Only the reply for the request that actually holds the slot may release
@@ -427,7 +445,8 @@ void InlineCompletionController::onResult(sal_uInt64 nGeneration, const FetchRes
     // watchdog already abandoned could return late and free the slot belonging
     // to the newer request that replaced it, putting two fetches in flight at
     // once (project#228).
-    if (nGeneration == m_nInFlightGeneration)
+    const bool bOwnsSlot = (nGeneration == m_nInFlightGeneration);
+    if (bOwnsSlot)
     {
         m_bInFlight = false;
 
@@ -440,14 +459,19 @@ void InlineCompletionController::onResult(sal_uInt64 nGeneration, const FetchRes
         }
     }
 
+    // A reply that does not own the slot belongs to a request the watchdog
+    // already abandoned (requestNow() is the only place that clears
+    // m_nInFlightGeneration, and only for that reason). Its failure was
+    // already counted there, and its outcome is stale either way -- counting
+    // a late non-200 again would double-count, and a late 200 resetting
+    // m_nFailures would mask real consecutive failures of the request that
+    // has since taken the slot (project#234). Discard it outright.
+    if (!bOwnsSlot)
+        return;
+
     if (rResult.nStatus != 200)
     {
-        ++m_nFailures;
-        if (m_nFailures >= 3)
-        {
-            m_nBackoffUntilMs = tools::Time::GetSystemTicks() + 30000;
-            m_nFailures = 0;
-        }
+        noteFailure();
         return;
     }
 

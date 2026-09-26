@@ -17,6 +17,8 @@
  *   getActiveTheme  - The theme this process actually resolved at startup
  *                      (include/vcl/officelabstheme.hxx), as opposed to the
  *                      agent's saved-but-possibly-pending theme.txt.
+ *   openExternalUrl - Open an https:// URL in the user's default system
+ *                      browser (device-grant sign-in, core#117).
  *
  * THREADING: m_pPanel is std::atomic because it's read on the CEF IO
  *            thread (OnQuery) and written on the VCL thread (setPanel).
@@ -36,6 +38,7 @@
 #endif
 
 #include <include/wrapper/cef_message_router.h>
+#include <rtl/ustring.hxx>
 #include <string>
 #include <atomic>
 
@@ -44,6 +47,15 @@ namespace officelabs {
 /// Pure JSON serialization of the getActiveTheme response, split out from
 /// handleGetActiveTheme so it is unit-testable without a CefBrowser/CefFrame.
 OFFICELABS_DLLPUBLIC std::string buildActiveThemeJson(const std::string& themeName);
+
+/// True when |rUrl| is safe to hand to the OS's URL opener for
+/// openExternalUrl: well-formed https, no control characters, no
+/// whitespace, no shell/URI metacharacters, and no longer than
+/// kMaxOpenableExternalUrlLength. Split out from handleOpenExternalUrl so
+/// it is unit-testable without a CefBrowser/CefFrame.
+/// A page that reaches this handler is untrusted content -- this is the
+/// only gate before the URL is opened, so reject rather than best-effort.
+OFFICELABS_DLLPUBLIC bool isOpenableExternalUrl(const OUString& rUrl);
 
 class WebViewPanel;
 
@@ -78,6 +90,7 @@ private:
     void handleRequestConsent(const std::string& json, CefRefPtr<Callback> callback);
     void handleRequestOfficeRestart(CefRefPtr<Callback> callback);
     void handleGetActiveTheme(CefRefPtr<Callback> callback);
+    void handleOpenExternalUrl(const std::string& json, CefRefPtr<Callback> callback);
 
     std::atomic<WebViewPanel*> m_pPanel;
 };

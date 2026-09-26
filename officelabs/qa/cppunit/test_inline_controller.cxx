@@ -1288,6 +1288,169 @@ private:
         xController->dispose();
     }
 
+    // GIVEN one live request fails, a second is abandoned by the watchdog and
+    // its late reply eventually arrives as 200,
+    // WHEN one more live request fails afterwards,
+    // THEN backoff engages on that third failure -- proving the late 200 did
+    // not reset the failure count to 0 (which would have needed two more
+    // failures instead of one). This is the masking half of project#234: a
+    // late success from a request the watchdog already gave up on must not
+    // erase real, still-relevant failure evidence.
+    void testAbandonedReplySuccessDoesNotMaskFailures()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        // Shared, captured by value -- see the note on testHungFetcherDoesNotStrandInFlight.
+        auto pCalls = std::make_shared<std::atomic<int>>(0);
+        auto pReleaseAbandoned = std::make_shared<std::atomic<bool>>(false);
+        auto pReleaseLive = std::make_shared<std::atomic<bool>>(false);
+        officelabs::InlineCompletionController::FetchResult aFailure;
+        aFailure.nStatus = 500;
+        aFailure.aBody = "error";
+        officelabs::InlineCompletionController::Fetcher aFetcher =
+            [pCalls, pReleaseAbandoned, pReleaseLive, aFailure](const OString& /*rBody*/) {
+                const int nMine = ++*pCalls;
+                // Call 1 fails immediately. Call 2 is the one the watchdog
+                // abandons: it hangs until released, then reports success --
+                // the reply the fix must discard rather than count. Call 3 is
+                // the live request that takes over the slot after the
+                // abandonment; it also hangs so the test controls exactly
+                // when it fails, relative to call 2's late reply.
+                if (nMine == 1)
+                    return aFailure;
+                std::atomic<bool>& rGate = (nMine == 2) ? *pReleaseAbandoned : *pReleaseLive;
+                while (!rGate.load())
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                if (nMine == 2)
+                    return officelabs::InlineCompletionController::FetchResult{
+                        200, R"({"suggestions":[{"text":" jumps"}]})"};
+                return aFailure;
+            };
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        vcl::Window* pEditWin = getEditWindow();
+        rtl::Reference<officelabs::InlineCompletionController> xController(
+            new officelabs::InlineCompletionController(
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin), makeEnabledProvider()));
+        xController->start();
+
+        // Failure 1: an ordinary live request that completes with 500.
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+        CPPUNIT_ASSERT_EQUAL(1, pCalls->load());
+
+        // Failure 2: issue the request that will be abandoned, then let the
+        // watchdog fire on the next requestNow() -- zero timeout so the test
+        // does not have to wait out the real 10 s deadline.
+        xController->setInFlightTimeoutMsForTest(0);
+        xController->requestNow();
+        for (int i = 0; i < 200 && pCalls->load() < 2; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        CPPUNIT_ASSERT_EQUAL(2, pCalls->load());
+        CPPUNIT_ASSERT(xController->isInFlight());
+
+        // The watchdog abandons call 2 (counting its second failure) and
+        // immediately issues call 3, which takes the slot and hangs.
+        xController->requestNow();
+        for (int i = 0; i < 200 && pCalls->load() < 3; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        CPPUNIT_ASSERT_EQUAL(3, pCalls->load());
+        CPPUNIT_ASSERT(xController->isInFlight());
+
+        // Call 2's late reply lands: 200, for a generation that no longer
+        // owns the slot. It must be discarded entirely, not counted and not
+        // allowed to reset the failure count.
+        *pReleaseAbandoned = true;
+        for (int i = 0; i < 40; ++i)
+        {
+            Scheduler::ProcessEventsToIdle();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        // Call 3 still owns the slot -- the late reply for call 2 changed
+        // nothing about it.
+        CPPUNIT_ASSERT(xController->isInFlight());
+
+        // Failure 3 (the live one): call 3 finally completes with 500. If the
+        // late 200 above had reset the failure count, this alone would not
+        // reach the threshold and the next requestNow() below would fetch
+        // again instead of being blocked by backoff.
+        *pReleaseLive = true;
+        drainUntilIdle(xController.get());
+        CPPUNIT_ASSERT(!xController->isInFlight());
+
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+        CPPUNIT_ASSERT_EQUAL(3, pCalls->load());
+
+        xController->dispose();
+    }
+
+    // GIVEN a fetcher that never returns at all,
+    // WHEN the watchdog abandons three requests to it in a row,
+    // THEN backoff engages on the third abandonment -- proving the fix that
+    // stops counting a late reply's own status does not also stop counting
+    // the abandonment itself. A persistently hung agent must still reach
+    // backoff; it must not be suppressed as a side effect of project#234's
+    // fix (a persistently-dead agent is project#228's failure mode, which the
+    // watchdog exists to recover from -- backoff still has to engage against
+    // it, or every abandonment just spawns another detached thread forever).
+    void testRepeatedAbandonmentStillTripsBackoff()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        auto pCalls = std::make_shared<std::atomic<int>>(0);
+        auto pRelease = std::make_shared<std::atomic<bool>>(false);
+        officelabs::InlineCompletionController::Fetcher aFetcher =
+            [pCalls, pRelease](const OString& /*rBody*/) {
+                ++*pCalls;
+                while (!pRelease->load())
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                return officelabs::InlineCompletionController::FetchResult{500, "error"};
+            };
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        vcl::Window* pEditWin = getEditWindow();
+        rtl::Reference<officelabs::InlineCompletionController> xController(
+            new officelabs::InlineCompletionController(
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin), makeEnabledProvider()));
+        xController->start();
+        xController->setInFlightTimeoutMsForTest(0);
+
+        xController->requestNow(); // call 1, hangs
+        for (int i = 0; i < 200 && pCalls->load() < 1; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+        xController->requestNow(); // watchdog abandons 1 (failure 1), issues 2
+        for (int i = 0; i < 200 && pCalls->load() < 2; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+        xController->requestNow(); // watchdog abandons 2 (failure 2), issues 3
+        for (int i = 0; i < 200 && pCalls->load() < 3; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        CPPUNIT_ASSERT(xController->isInFlight());
+
+        // Watchdog abandons 3: the third consecutive failure. Backoff engages
+        // immediately, so no fourth request is issued even though nothing is
+        // in flight any more.
+        xController->requestNow();
+        CPPUNIT_ASSERT(!xController->isInFlight());
+        CPPUNIT_ASSERT_EQUAL(3, pCalls->load());
+
+        // Still backed off: another requestNow() does not fetch either.
+        xController->requestNow();
+        CPPUNIT_ASSERT_EQUAL(3, pCalls->load());
+
+        *pRelease = true;
+        drainUntilIdle(xController.get());
+        xController->dispose();
+    }
+
     CPPUNIT_TEST_SUITE(InlineCompletionControllerTest);
     CPPUNIT_TEST(testAcceptSuggestion);
     CPPUNIT_TEST(testTabAcceptsSuggestion);
@@ -1320,6 +1483,8 @@ private:
     CPPUNIT_TEST(testTypeThroughGuardFailureHidesGhostAndRearmsDebounce);
     CPPUNIT_TEST(testHungFetcherDoesNotStrandInFlight);
     CPPUNIT_TEST(testAbandonedReplyDoesNotReleaseNewerRequest);
+    CPPUNIT_TEST(testAbandonedReplySuccessDoesNotMaskFailures);
+    CPPUNIT_TEST(testRepeatedAbandonmentStillTripsBackoff);
     CPPUNIT_TEST_SUITE_END();
 };
 

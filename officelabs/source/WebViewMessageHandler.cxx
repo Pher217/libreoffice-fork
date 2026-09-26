@@ -31,6 +31,9 @@
 #include <com/sun/star/task/OfficeRestartManager.hpp>
 #include <com/sun/star/task/XInteractionHandler.hpp>
 #include <com/sun/star/uno/Exception.hpp>
+#include <com/sun/star/system/SystemShellExecute.hpp>
+#include <com/sun/star/system/SystemShellExecuteFlags.hpp>
+#include <com/sun/star/system/XSystemShellExecute.hpp>
 #include <comphelper/processfactory.hxx>
 
 #include <functional>
@@ -148,6 +151,46 @@ std::string buildActiveThemeJson(const std::string& themeName)
     return "{\"theme\":\"" + escaped + "\"}";
 }
 
+// A device-grant verification URL is short (host + a couple of path
+// segments + a user_code query param -- well under 200 characters in
+// practice). 2048 is the classic "URL length" ceiling browsers and Windows
+// shell tooling have historically enforced in practice (e.g. IE/old Edge's
+// documented limit), so anything under it is generously long for this
+// feature and anything over it has no legitimate reason to reach
+// SystemShellExecute. Keep this constant identical on the TS side
+// (cefBridge.ts isOpenableExternalUrl) -- the two validators must stay in
+// lockstep, character for character.
+constexpr sal_Int32 kMaxOpenableExternalUrlLength = 2048;
+
+bool isOpenableExternalUrl(const OUString& rUrl)
+{
+    // Opened via the OS's own URL handler (SystemShellExecute, URIS_ONLY),
+    // never a shell -- but a page that reaches this handler is untrusted
+    // content, and this is the only check before that handoff. https only:
+    // file://, javascript:, data:, mailto:, a bare path, or anything else
+    // either escapes "show the user a page" or hands a native handler
+    // attacker-chosen input.
+    if (!rUrl.startsWith("https://"))
+        return false;
+
+    if (rUrl.getLength() > kMaxOpenableExternalUrlLength)
+        return false;
+
+    for (sal_Int32 i = 0; i < rUrl.getLength(); ++i)
+    {
+        const sal_Unicode c = rUrl[i];
+        // Control characters, whitespace, and URI/shell metacharacters have
+        // no place in a well-formed https URL -- reject rather than try to
+        // enumerate every unsafe scheme or encoding trick.
+        if (c <= 0x20 || c == 0x7f
+            || c == '`' || c == ';' || c == '|' || c == '&' || c == '$'
+            || c == '<' || c == '>' || c == '"' || c == '\'' || c == '\\')
+            return false;
+    }
+
+    return true;
+}
+
 WebViewMessageHandler::WebViewMessageHandler(WebViewPanel* pPanel)
     : m_pPanel(pPanel)
 {
@@ -248,6 +291,13 @@ bool WebViewMessageHandler::OnQuery(
         || req.find("\"type\": \"getActiveTheme\"") != std::string::npos)
     {
         handleGetActiveTheme(callback);
+        return true;
+    }
+
+    if (req.find("\"type\":\"openExternalUrl\"") != std::string::npos
+        || req.find("\"type\": \"openExternalUrl\"") != std::string::npos)
+    {
+        handleOpenExternalUrl(req, callback);
         return true;
     }
 
@@ -553,6 +603,50 @@ void WebViewMessageHandler::handleGetActiveTheme(CefRefPtr<Callback> callback)
 {
     const std::string sTheme = vcl::officelabs::GetOLThemeSource().name;
     callback->Success(buildActiveThemeJson(sTheme));
+}
+
+// core#117 / core#112. The device authorization grant needs the user to
+// approve a code on the verification page in a REAL browser -- CEF's own
+// window is not acceptable, since it is exactly the surface the sidebar
+// renders remote/untrusted content into. isOpenableExternalUrl() is the
+// only gate; SystemShellExecute + URIS_ONLY is the same cross-platform
+// mechanism LibreOffice's own hyperlink control uses
+// (vcl/source/control/fixedhyper.cxx), never a shell.
+//
+// Like requestOfficeRestart this touches no document and no panel, so it is
+// dispatched to the VCL thread purely to keep UNO component-context calls
+// off the CEF browser-process UI thread, not because it needs the panel.
+void WebViewMessageHandler::handleOpenExternalUrl(const std::string& json,
+                                                   CefRefPtr<Callback> callback)
+{
+    const std::string sRawUrl = extractJsonString(json, "url");
+    const OUString sUrl
+        = OStringToOUString(OString(sRawUrl.c_str(), sRawUrl.size()), RTL_TEXTENCODING_UTF8);
+
+    if (!isOpenableExternalUrl(sUrl))
+    {
+        SAL_WARN("officelabs.cef", "openExternalUrl: refused a non-https or malformed URL");
+        callback->Failure(400, "url must be a well-formed https:// URL");
+        return;
+    }
+
+    CefRefPtr<Callback> cb = callback;
+
+    postToVclThread([sUrl, cb]() {
+        try
+        {
+            css::uno::Reference<css::system::XSystemShellExecute> xSystemShellExecute(
+                css::system::SystemShellExecute::create(comphelper::getProcessComponentContext()));
+            xSystemShellExecute->execute(sUrl, OUString(),
+                                         css::system::SystemShellExecuteFlags::URIS_ONLY);
+            cb->Success("{\"success\":true}");
+        }
+        catch (const css::uno::Exception&)
+        {
+            SAL_WARN("officelabs.cef", "openExternalUrl: SystemShellExecute failed");
+            cb->Failure(500, "failed to open URL");
+        }
+    });
 }
 
 } // namespace officelabs
