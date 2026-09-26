@@ -111,6 +111,12 @@ private:
 
     bool isFromEditWindow(const css::uno::Reference<css::uno::XInterface>& xSource) const;
     void onResult(sal_uInt64 nGeneration, const FetchResult& rResult);
+    /// Records one completion failure and engages backoff after three
+    /// consecutive ones. Called from exactly two places: onResult() for a
+    /// non-200 reply that still owns the in-flight slot, and requestNow() for
+    /// the watchdog abandoning a hung slot -- never for a late reply from an
+    /// already-abandoned request (project#234).
+    void noteFailure();
     void hideGhost();
     bool isComposing() const;
     bool isEnabled() const;
