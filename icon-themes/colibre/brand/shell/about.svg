@@ -8,23 +8,6 @@
       <stop offset="0%" stop-color="#0D9488"/>
       <stop offset="100%" stop-color="#14b8a6"/>
     </linearGradient>
-    <!-- Brand mark spheres. Identical gradients to assets/logos/officelabs-mark.svg
-         so the About splash, the launcher icon and the landing mark are one artwork. -->
-    <radialGradient id="s1" cx="35%" cy="30%" r="75%">
-      <stop offset="0%" stop-color="#93C5FD"/>
-      <stop offset="55%" stop-color="#3B82F6"/>
-      <stop offset="100%" stop-color="#1E3A8A"/>
-    </radialGradient>
-    <radialGradient id="s2" cx="35%" cy="30%" r="75%">
-      <stop offset="0%" stop-color="#67E8F9"/>
-      <stop offset="55%" stop-color="#0EA5E9"/>
-      <stop offset="100%" stop-color="#0C4A6E"/>
-    </radialGradient>
-    <radialGradient id="s3" cx="35%" cy="30%" r="75%">
-      <stop offset="0%" stop-color="#A5B4FC"/>
-      <stop offset="55%" stop-color="#6366F1"/>
-      <stop offset="100%" stop-color="#1E1B4B"/>
-    </radialGradient>
   </defs>
 
   <!-- Background -->
@@ -40,13 +23,10 @@
     <polygon points="150,80 220,115 220,185 150,220 80,185 80,115" fill="none" stroke="#0D9488" stroke-width="1"/>
   </g>
 
-  <!-- Brand mark, centred where the old diamond sat. The mark is authored on a
-       48x48 grid, so scale(1.75) renders it 84px wide and the translate puts its
-       centre (24,24) at (150,120). -->
-  <g transform="translate(108, 78) scale(1.75)">
-    <circle cx="16" cy="18" r="10" fill="url(#s1)"/>
-    <circle cx="32" cy="18" r="10" fill="url(#s2)"/>
-    <circle cx="24" cy="32" r="10" fill="url(#s3)"/>
+  <!-- Brand mark (caret mark, 32x32 grid, ink bbox 26.4x24 centred at 13.6,16): scale(3.2) renders it ~84px wide, translate puts that centre at (150,120). -->
+  <g transform="translate(106.5, 68.8) scale(3.2)">
+    <circle cx="11.5" cy="16" r="7.4" fill="none" stroke="#F8F8F2" stroke-width="3.4"/>
+    <rect x="23.2" y="4" width="3.6" height="24" rx="1.2" fill="#2DD4BF"/>
   </g>
 
   <!-- OfficeLabs text -->
