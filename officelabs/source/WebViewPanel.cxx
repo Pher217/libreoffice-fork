@@ -972,6 +972,7 @@ void WebViewPanel::detectDocument()
     if (!pShell)
     {
         SAL_WARN("officelabs.cef", "detectDocument: no document shell found");
+        m_pDocController->setAppType(OUString());
         return;
     }
 

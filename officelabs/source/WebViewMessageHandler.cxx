@@ -516,7 +516,7 @@ void WebViewMessageHandler::handleGetAppType(CefRefPtr<Callback> callback)
     WebViewPanel* panel = m_pPanel.load(std::memory_order_acquire);
     if (!panel)
     {
-        callback->Success("{\"appType\":\"writer\"}");
+        callback->Success("{\"appType\":\"\"}");
         return;
     }
 
@@ -526,14 +526,14 @@ void WebViewMessageHandler::handleGetAppType(CefRefPtr<Callback> callback)
         WebViewPanel* p = m_pPanel.load(std::memory_order_acquire);
         if (!p)
         {
-            cb->Success("{\"appType\":\"writer\"}");
+            cb->Success("{\"appType\":\"\"}");
             return;
         }
 
         p->detectDocument();
 
         DocumentController* dc = p->getDocController();
-        OUString appType = dc ? dc->getApplicationType() : u"writer"_ustr;
+        OUString appType = dc ? dc->getApplicationType() : OUString();
 
         OString utf8AppType = OUStringToOString(appType, RTL_TEXTENCODING_UTF8);
         std::string response = "{\"appType\":\"" + std::string(utf8AppType.getStr()) + "\"}";

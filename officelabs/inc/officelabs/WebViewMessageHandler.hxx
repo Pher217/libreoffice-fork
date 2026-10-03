@@ -9,7 +9,8 @@
  *   getDocument  - Read document text via DocumentController
  *   getSelection - Get current selection
  *   applyEdit    - Apply/reject a pending edit
- *   getAppType   - Get current application type ("writer", "calc", "impress")
+ *   getAppType   - Get current application type ("writer", "calc", "impress",
+ *                  "draw"), or "" when no document is open
  *   getSessionToken - Hand the WebView the agent's session token (P0b)
  *   requestConsent  - Run the native consent dialog for a challenge (P0b, D9)
  *   requestOfficeRestart - Ask LibreOffice to restart itself (theme applies

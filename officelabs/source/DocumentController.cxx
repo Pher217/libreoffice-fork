@@ -133,11 +133,11 @@ void DocumentController::setController(const uno::Reference<frame::XController>&
     m_xController = xController;
 }
 
+// Empty when no document is open (the Start Center), so the panel can show
+// its no-document state instead of a Writer panel (officelabs-core#141).
 OUString DocumentController::getApplicationType()
 {
-    if (!m_sAppType.isEmpty())
-        return m_sAppType;
-    return u"writer"_ustr;
+    return m_sAppType;
 }
 
 OUString DocumentController::getDocumentUrl()
