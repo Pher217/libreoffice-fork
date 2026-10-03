@@ -649,6 +649,26 @@ public:
         CPPUNIT_ASSERT_EQUAL(sal_Int32(500), aContext.textAfterContext.getLength());
     }
 
+    // GIVEN a controller that has not been bound to a document (the Start Center)
+    // WHEN the application type is read
+    // THEN it is empty, not a default "writer" (officelabs-core#141).
+    void testApplicationType_emptyWithoutDocument()
+    {
+        officelabs::DocumentController aController;
+        CPPUNIT_ASSERT_EQUAL(OUString(), aController.getApplicationType());
+    }
+
+    // GIVEN a controller whose application type was detected as "calc"
+    // WHEN the document goes away and the type is cleared
+    // THEN the application type reads empty again.
+    void testApplicationType_clearedAfterDocumentCloses()
+    {
+        officelabs::DocumentController aController;
+        aController.setAppType(u"calc"_ustr);
+        aController.setAppType(OUString());
+        CPPUNIT_ASSERT_EQUAL(OUString(), aController.getApplicationType());
+    }
+
     CPPUNIT_TEST_SUITE(DocumentControllerCursorTest);
     CPPUNIT_TEST(testCursorContext_endOfParagraph);
     CPPUNIT_TEST(testCursorContext_afterFourChars);
@@ -668,6 +688,8 @@ public:
     CPPUNIT_TEST(testInsertAtCursor_protectedSectionIsReadOnly);
     CPPUNIT_TEST(testCursorCharFont_familyName);
     CPPUNIT_TEST(testCursorCharFont_heightPt);
+    CPPUNIT_TEST(testApplicationType_emptyWithoutDocument);
+    CPPUNIT_TEST(testApplicationType_clearedAfterDocumentCloses);
     CPPUNIT_TEST_SUITE_END();
 };
 
