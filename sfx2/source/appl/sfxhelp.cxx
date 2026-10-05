@@ -18,6 +18,7 @@
  */
 
 #include <config_folders.h>
+#include <cstdlib>
 #include <sfx2/sfxhelp.hxx>
 #include <helpids.h>
 
@@ -68,6 +69,7 @@
 #include <vcl/weld/MessageDialog.hxx>
 #include <vcl/weld/weld.hxx>
 #include <openuriexternally.hxx>
+#include <officelabsdocs.hxx>
 
 #include <comphelper/lok.hxx>
 #include <LibreOfficeKit/LibreOfficeKitEnums.h>
@@ -624,9 +626,41 @@ void SfxHelp::SearchKeyword( const OUString& rKeyword )
     Start_Impl(OUString(), static_cast<weld::Widget*>(nullptr), rKeyword);
 }
 
+/// OfficeLabs: Help (F1, Help menu) opens the OfficeLabs docs site in the system browser
+/// instead of LibreOffice's help (officelabs-project#303).
+static bool impl_showOfficeLabsDocs(weld::Widget* pDialogParent)
+{
+    if (comphelper::LibreOfficeKit::isActive())
+        return false;
+
+    const OUString aDocsUrl = OUString::fromUtf8(sfx2::officelabs::ResolveDocsUrl(
+        std::getenv("OFFICELABS_DOCS_URL"), std::getenv("OFFICELABS_CHANNEL")));
+    try
+    {
+#ifdef MACOSX
+        LSOpenCFURLRef(CFURLCreateWithString(kCFAllocatorDefault,
+                           CFStringCreateWithCString(kCFAllocatorDefault,
+                               aDocsUrl.toUtf8().getStr(),
+                               kCFStringEncodingUTF8),
+                           nullptr),
+            nullptr);
+        (void)pDialogParent;
+#else
+        sfx2::openUriExternally(aDocsUrl, false, pDialogParent);
+#endif
+        return true;
+    }
+    catch (const Exception&)
+    {
+    }
+    return false;
+}
+
 bool SfxHelp::Start( const OUString& rURL, const vcl::Window* pWindow )
 {
     if (bLaunchingHelp)
+        return true;
+    if (impl_showOfficeLabsDocs(nullptr))
         return true;
     bLaunchingHelp = true;
     bool bRet = Start_Impl( rURL, pWindow );
@@ -637,6 +671,8 @@ bool SfxHelp::Start( const OUString& rURL, const vcl::Window* pWindow )
 bool SfxHelp::Start(const OUString& rURL, weld::Widget* pWidget)
 {
     if (bLaunchingHelp)
+        return true;
+    if (impl_showOfficeLabsDocs(pWidget))
         return true;
     bLaunchingHelp = true;
     bool bRet = Start_Impl(rURL, pWidget, OUString());
