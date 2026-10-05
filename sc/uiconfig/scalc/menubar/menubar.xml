@@ -299,7 +299,6 @@
           <menu:menuitem menu:id=".uno:Pushbutton"/>
           <menu:menuitem menu:id=".uno:Imagebutton"/>
           <menu:menuseparator/>
-          <menu:menuseparator/>
           <menu:menuitem menu:id=".uno:FormattedField"/>
           <menu:menuitem menu:id=".uno:DateField"/>
           <menu:menuitem menu:id=".uno:TimeField"/>
@@ -763,9 +762,6 @@
       <menu:menuitem menu:id=".uno:SendFeedback"/>
       <menu:menuseparator/>
       <menu:menuitem menu:id=".uno:SafeMode" menu:style="text"/>
-      <menu:menuseparator/>
-      <menu:menuitem menu:id=".uno:GetInvolved" menu:style="text"/>
-      <menu:menuitem menu:id=".uno:Donation"/>
       <menu:menuseparator/>
       <menu:menuitem menu:id=".uno:ShowLicense" menu:style="text"/>
       <menu:menuitem menu:id=".uno:About"/>
