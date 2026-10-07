@@ -19,6 +19,7 @@
 #include <postwin.h>
 #endif
 
+#include <officelabs/BundledAgent.hxx>
 #include <officelabs/CefDebugPort.hxx>
 #include <officelabs/CefInit.hxx>
 #include <officelabs/WebViewPanel.hxx>
@@ -84,6 +85,7 @@ public:
 
     void SAL_CALL notifyTermination(const css::lang::EventObject&) override
     {
+        officelabs::BundledAgent::stop();
         officelabs::CefInit::instance().shutdown();
     }
 
@@ -124,6 +126,10 @@ bool CefInit::initialize()
         SAL_INFO("officelabs.cef", "headless mode: CEF not started");
         return false;
     }
+
+    // A Finder launch runs no launcher script: start the agent bundled in the
+    // .app (no-op for dev builds and off macOS). Once per process.
+    officelabs::BundledAgent::ensureStarted();
 
 #ifdef MACOSX
     // Load the CEF framework at runtime before any other CEF call. The loader
