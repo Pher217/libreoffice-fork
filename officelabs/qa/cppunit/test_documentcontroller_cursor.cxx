@@ -9,6 +9,7 @@
 
 #include <test/unoapi_test.hxx>
 
+#include <comphelper/propertyvalue.hxx>
 #include <comphelper/string.hxx>
 #include <rtl/ustrbuf.hxx>
 
@@ -24,7 +25,9 @@
 #include <com/sun/star/document/XUndoManager.hpp>
 #include <com/sun/star/document/XUndoManagerSupplier.hpp>
 #include <com/sun/star/frame/XModel.hpp>
+#include <com/sun/star/frame/XStorable.hpp>
 #include <com/sun/star/lang/XMultiServiceFactory.hpp>
+#include <com/sun/star/sheet/XSpreadsheetDocument.hpp>
 #include <com/sun/star/text/ControlCharacter.hpp>
 #include <com/sun/star/text/XText.hpp>
 #include <com/sun/star/text/XTextContent.hpp>
@@ -669,6 +672,63 @@ public:
         CPPUNIT_ASSERT_EQUAL(OUString(), aController.getApplicationType());
     }
 
+    // GIVEN a Writer document saved to disk
+    // WHEN the sidebar binds it through setDocument alone (no setModel), as
+    //   WebViewPanel::detectDocument does
+    // THEN getDocumentUrl reports the saved file's url, so the sidebar can key
+    //   the chat history by document (officelabs-project#105).
+    void testDocumentUrl_savedWriterDocument()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<frame::XStorable> xStorable(mxComponent, UNO_QUERY_THROW);
+        xStorable->storeAsURL(maTempFile.GetURL(),
+                              { comphelper::makePropertyValue(u"FilterName"_ustr,
+                                                              u"writer8"_ustr) });
+        Reference<text::XTextDocument> xTextDocument(mxComponent, UNO_QUERY_THROW);
+
+        officelabs::DocumentController aController;
+        aController.setDocument(xTextDocument);
+
+        CPPUNIT_ASSERT_EQUAL(maTempFile.GetURL(), aController.getDocumentUrl());
+    }
+
+    // GIVEN a Calc document saved to disk
+    // WHEN the sidebar binds it through setCalcDocument alone
+    // THEN getDocumentUrl reports the saved file's url.
+    void testDocumentUrl_savedCalcDocument()
+    {
+        loadFromURL(u"private:factory/scalc"_ustr);
+        Reference<frame::XStorable> xStorable(mxComponent, UNO_QUERY_THROW);
+        xStorable->storeAsURL(maTempFile.GetURL(),
+                              { comphelper::makePropertyValue(u"FilterName"_ustr,
+                                                              u"calc8"_ustr) });
+        Reference<sheet::XSpreadsheetDocument> xCalcDocument(mxComponent, UNO_QUERY_THROW);
+
+        officelabs::DocumentController aController;
+        aController.setCalcDocument(xCalcDocument);
+
+        CPPUNIT_ASSERT_EQUAL(maTempFile.GetURL(), aController.getDocumentUrl());
+    }
+
+    // GIVEN a controller bound to a saved Writer document
+    // WHEN it is rebound to no document
+    // THEN getDocumentUrl reads empty instead of the previous document's url.
+    void testDocumentUrl_emptyAfterUnbinding()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<frame::XStorable> xStorable(mxComponent, UNO_QUERY_THROW);
+        xStorable->storeAsURL(maTempFile.GetURL(),
+                              { comphelper::makePropertyValue(u"FilterName"_ustr,
+                                                              u"writer8"_ustr) });
+        Reference<text::XTextDocument> xTextDocument(mxComponent, UNO_QUERY_THROW);
+
+        officelabs::DocumentController aController;
+        aController.setDocument(xTextDocument);
+        aController.setDocument(Reference<text::XTextDocument>());
+
+        CPPUNIT_ASSERT_EQUAL(OUString(), aController.getDocumentUrl());
+    }
+
     CPPUNIT_TEST_SUITE(DocumentControllerCursorTest);
     CPPUNIT_TEST(testCursorContext_endOfParagraph);
     CPPUNIT_TEST(testCursorContext_afterFourChars);
@@ -690,6 +750,9 @@ public:
     CPPUNIT_TEST(testCursorCharFont_heightPt);
     CPPUNIT_TEST(testApplicationType_emptyWithoutDocument);
     CPPUNIT_TEST(testApplicationType_clearedAfterDocumentCloses);
+    CPPUNIT_TEST(testDocumentUrl_savedWriterDocument);
+    CPPUNIT_TEST(testDocumentUrl_savedCalcDocument);
+    CPPUNIT_TEST(testDocumentUrl_emptyAfterUnbinding);
     CPPUNIT_TEST_SUITE_END();
 };
 

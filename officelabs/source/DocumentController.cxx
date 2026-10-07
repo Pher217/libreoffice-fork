@@ -80,15 +80,18 @@ void DocumentController::setDocument(const uno::Reference<text::XTextDocument>& 
     m_xDocument = xDoc;
     m_xText = uno::Reference<text::XText>();
     m_xController = uno::Reference<frame::XController>();
+    // getDocumentUrl() reads m_xModel. The sidebar binds documents through these
+    // setters only, never setModel(), so each one must bind the model too or the
+    // url is always empty and chat history cannot be keyed by document (#105).
+    m_xModel = uno::Reference<frame::XModel>(m_xDocument, uno::UNO_QUERY);
 
     if (!m_xDocument.is())
         return;
 
     m_xText = m_xDocument->getText();
 
-    uno::Reference<frame::XModel> xModel(m_xDocument, uno::UNO_QUERY);
-    if (xModel.is())
-        m_xController = xModel->getCurrentController();
+    if (m_xModel.is())
+        m_xController = m_xModel->getCurrentController();
 }
 
 void DocumentController::setCalcDocument(const uno::Reference<sheet::XSpreadsheetDocument>& xDoc)
@@ -98,12 +101,13 @@ void DocumentController::setCalcDocument(const uno::Reference<sheet::XSpreadshee
     m_xText = uno::Reference<text::XText>();
     m_xImpressDoc = uno::Reference<drawing::XDrawPagesSupplier>(); // clear Impress ref
 
+    m_xModel = uno::Reference<frame::XModel>(m_xCalcDoc, uno::UNO_QUERY);
+
     if (!m_xCalcDoc.is())
         return;
 
-    uno::Reference<frame::XModel> xModel(m_xCalcDoc, uno::UNO_QUERY);
-    if (xModel.is())
-        m_xController = xModel->getCurrentController();
+    if (m_xModel.is())
+        m_xController = m_xModel->getCurrentController();
 }
 
 void DocumentController::setImpressDocument(const uno::Reference<drawing::XDrawPagesSupplier>& xDoc)
@@ -113,12 +117,13 @@ void DocumentController::setImpressDocument(const uno::Reference<drawing::XDrawP
     m_xText = uno::Reference<text::XText>();
     m_xCalcDoc = uno::Reference<sheet::XSpreadsheetDocument>(); // clear Calc ref
 
+    m_xModel = uno::Reference<frame::XModel>(m_xImpressDoc, uno::UNO_QUERY);
+
     if (!m_xImpressDoc.is())
         return;
 
-    uno::Reference<frame::XModel> xModel(m_xImpressDoc, uno::UNO_QUERY);
-    if (xModel.is())
-        m_xController = xModel->getCurrentController();
+    if (m_xModel.is())
+        m_xController = m_xModel->getCurrentController();
 }
 
 void DocumentController::setModel(const uno::Reference<frame::XModel>& xModel)
