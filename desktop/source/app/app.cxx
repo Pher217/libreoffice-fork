@@ -262,6 +262,15 @@ bool cleanExtensionCache() {
         break;
     }
     utl::removeTree(extDir);
+    // OfficeLabs: the rasterised icon cache (see getIconCacheUrl in
+    // vcl/source/image/ImplImageTree.cxx) is keyed by theme/scale/name only, so
+    // an upgrade that changes an icon kept serving the old bitmap. Not
+    // RemoveIconCacheDirectory(): UCB is not up yet at this point.
+    OUString iconCacheDir(
+        u"${$BRAND_BASE_DIR/" LIBO_ETC_FOLDER "/" SAL_CONFIGFILE("bootstrap")
+        ":UserInstallation}/cache"_ustr);
+    rtl::Bootstrap::expandMacros(iconCacheDir); //TODO: detect failure
+    utl::removeTree(iconCacheDir);
     OUString userRcFile(
         u"$UNO_USER_PACKAGES_CACHE/registry/"
         "com.sun.star.comp.deployment.component.PackageRegistryBackend/unorc"_ustr);
