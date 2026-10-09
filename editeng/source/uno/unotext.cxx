@@ -257,7 +257,12 @@ SvxUnoTextRangeBase::SvxUnoTextRangeBase(const SvxUnoTextRangeBase& rRange)
 SvxUnoTextRangeBase::~SvxUnoTextRangeBase() noexcept
 {
     if( mpEditSource )
+    {
+        // A remote client's last release destroys this on a URP thread; the range list is
+        // read by enumerations under the SolarMutex.
+        SolarMutexGuard aGuard;
         mpEditSource->removeRange( this );
+    }
 }
 
 void SvxUnoTextRangeBase::SetEditSource( SvxEditSource* pSource ) noexcept
@@ -1571,6 +1576,13 @@ SvxUnoTextRange::SvxUnoTextRange(const SvxUnoTextBase& rParent, bool bPortion /*
 
 SvxUnoTextRange::~SvxUnoTextRange() noexcept
 {
+    // Leave the range list before any part of this is destroyed: the enumerations reuse what
+    // they find there, and a remote client's last release lands here on a URP thread.
+    if( mpEditSource )
+    {
+        SolarMutexGuard aGuard;
+        mpEditSource->removeRange( this );
+    }
 }
 
 uno::Any SAL_CALL SvxUnoTextRange::queryAggregation( const uno::Type & rType )

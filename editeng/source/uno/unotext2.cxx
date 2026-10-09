@@ -19,6 +19,7 @@
 
 #include <sal/config.h>
 
+#include <atomic>
 #include <initializer_list>
 
 #include <rtl/ref.hxx>
@@ -36,6 +37,23 @@ using namespace ::com::sun::star;
     if( rType == cppu::UnoType<xint>::get() ) \
         return uno::Any(uno::Reference< xint >(this))
 
+namespace
+{
+// The edit source's range list holds raw pointers, and a range leaves it only at the end of its
+// destructor. A remote client's last release runs that destructor on a URP thread, so a range
+// found in the list may already be dying: take a reference only while the count is non-zero.
+bool tryAcquire(oslInterlockedCount& rRefCount)
+{
+    std::atomic_ref<oslInterlockedCount> aRefCount(rRefCount);
+    oslInterlockedCount nCount = aRefCount.load();
+    while (nCount != 0)
+    {
+        if (aRefCount.compare_exchange_weak(nCount, nCount + 1))
+            return true;
+    }
+    return false;
+}
+}
 
 // SvxUnoTextContentEnumeration
 
@@ -72,9 +90,9 @@ SvxUnoTextContentEnumeration::SvxUnoTextContentEnumeration( const SvxUnoTextBase
             if( pIterContent && (pIterContent->mnParagraph == currentPara) )
             {
                 ESelection aIterSel = pIterContent->GetSelection();
-                if( aIterSel == aCurrentParaSel )
+                if( aIterSel == aCurrentParaSel && tryAcquire( pIterContent->m_refCount ) )
                 {
-                    pContent = pIterContent;
+                    pContent = rtl::Reference<SvxUnoTextContent>( pIterContent, SAL_NO_ACQUIRE );
                     maContents.emplace_back(pContent );
                 }
             }
@@ -142,6 +160,13 @@ SvxUnoTextContent::SvxUnoTextContent( const SvxUnoTextContent& rContent ) noexce
 
 SvxUnoTextContent::~SvxUnoTextContent() noexcept
 {
+    // Leave the range list before any part of this is destroyed: the enumerations reuse what
+    // they find there, and a remote client's last release lands here on a URP thread.
+    if( mpEditSource )
+    {
+        SolarMutexGuard aGuard;
+        mpEditSource->removeRange( this );
+    }
 }
 
 // uno::XInterface
@@ -401,8 +426,9 @@ SvxUnoTextRangeEnumeration::SvxUnoTextRangeEnumeration(const SvxUnoTextBase& rPa
             if (pRange)
                 break;
             SvxUnoTextRange* pIterRange = dynamic_cast< SvxUnoTextRange* >( elemRange );
-            if( pIterRange && pIterRange->mbPortion && (aSel == pIterRange->maSelection) )
-                pRange = pIterRange;
+            if( pIterRange && pIterRange->mbPortion && (aSel == pIterRange->maSelection)
+                && tryAcquire( pIterRange->m_refCount ) )
+                pRange = rtl::Reference<SvxUnoTextRange>( pIterRange, SAL_NO_ACQUIRE );
         }
         if( pRange == nullptr )
         {
