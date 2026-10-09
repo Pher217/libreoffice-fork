@@ -1782,11 +1782,14 @@ SAL_WNODEPRECATED_DECLARATIONS_POP
     if (ThemeColors::VclPluginCanUseThemeColors())
         lcl_LoadColorsFromTheme(aStyleSettings);
 
-    // OfficeLabs: appinit applies the OfficeLabs palette to the window-family colours, but this
-    // per-frame merge overwrites them with the system colours, which left the status bar, the
-    // sidebar tab bar and the Calc headers on macOS grey. Re-apply them (officelabs-project#342).
+    // OfficeLabs: appinit applies the OfficeLabs palette to the face, dialog and window-family
+    // colours, but this per-frame merge (BatchSetBackgrounds and the lines above) overwrites them
+    // with the system colours, which left the status bar, the sidebar tab bar and the Calc
+    // headers on macOS grey. Re-apply them (officelabs-project#342).
     {
         const vcl::officelabs::OLColors aOLColors = vcl::officelabs::GetOLColors();
+        aStyleSettings.SetFaceColor(aOLColors.bg);
+        aStyleSettings.SetDialogColor(aOLColors.bg);
         aStyleSettings.SetWindowColor(aOLColors.bg);
         aStyleSettings.SetListBoxWindowBackgroundColor(aOLColors.surface);
         aStyleSettings.SetFieldColor(aOLColors.surface);
