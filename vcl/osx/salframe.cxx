@@ -36,6 +36,7 @@
 #include <vcl/syswin.hxx>
 #include <vcl/settings.hxx>
 #include <vcl/themecolors.hxx>
+#include <vcl/officelabstheme.hxx>
 
 #include <osx/saldata.hxx>
 #include <quartz/salgdi.h>
@@ -1725,6 +1726,16 @@ SAL_WNODEPRECATED_DECLARATIONS_POP
 
     aStyleSettings.SetFieldRolloverTextColor(aControlTextColor);
     aStyleSettings.SetFieldColor(aControlBackgroundColor);
+
+    // OfficeLabs: appinit applies the OfficeLabs palette to the window-family colours, but this
+    // per-frame merge overwrites them with the system colours, which left the status bar, the
+    // sidebar tab bar and the Calc headers on macOS grey. Re-apply them (officelabs-project#342).
+    {
+        const vcl::officelabs::OLColors aOLColors = vcl::officelabs::GetOLColors();
+        aStyleSettings.SetWindowColor(aOLColors.bg);
+        aStyleSettings.SetListBoxWindowBackgroundColor(aOLColors.surface);
+        aStyleSettings.SetFieldColor(aOLColors.surface);
+    }
     aStyleSettings.SetDefaultActionButtonTextColor(aAlternateSelectedControlTextColor);
     aStyleSettings.SetFlatButtonTextColor(aControlTextColor);
     aStyleSettings.SetDefaultButtonRolloverTextColor(aAlternateSelectedControlTextColor);
