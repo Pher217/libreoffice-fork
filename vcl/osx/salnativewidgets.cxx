@@ -510,10 +510,15 @@ bool AquaGraphicsBackendBase::performDrawNativeControl(ControlType nType,
     {
         case ControlType::Toolbar:
             {
+                // OfficeLabs: the StyleSettings window colour, not
+                // NSColor.windowBackgroundColor. On stock settings they are the same
+                // colour (AquaSalFrame::UpdateSettings derives one from the other);
+                // under an OfficeLabs theme only the former carries the palette, so
+                // the status bar and the sidebar tab bar stayed system grey.
                 if (bCanUseThemeColors)
                     drawBox(context, rc, colorFromRGB(ThemeColors::GetThemeColors().GetWindowColor()));
                 else
-                    drawBox(context, rc, NSColor.windowBackgroundColor);
+                    drawBox(context, rc, colorFromRGB(Application::GetSettings().GetStyleSettings().GetWindowColor()));
                 bOK = true;
             }
             break;
@@ -522,7 +527,7 @@ bool AquaGraphicsBackendBase::performDrawNativeControl(ControlType nType,
                 if (bCanUseThemeColors)
                     drawBox(context, rc, colorFromRGB(ThemeColors::GetThemeColors().GetWindowColor()));
                 else
-                    drawBox(context, rc, NSColor.windowBackgroundColor);
+                    drawBox(context, rc, colorFromRGB(Application::GetSettings().GetStyleSettings().GetWindowColor()));
                 bOK = true;
             }
             break;
