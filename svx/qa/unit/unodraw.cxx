@@ -9,6 +9,9 @@
 
 #include <cppunit/TestAssert.h>
 
+#include <thread>
+#include <vector>
+
 #include <com/sun/star/drawing/GraphicExportFilter.hpp>
 #include <com/sun/star/drawing/XDrawPageSupplier.hpp>
 #include <com/sun/star/drawing/XDrawPagesSupplier.hpp>
@@ -19,12 +22,17 @@
 #include <com/sun/star/text/XTextRange.hpp>
 #include <com/sun/star/text/ControlCharacter.hpp>
 #include <com/sun/star/frame/XStorable.hpp>
+#include <com/sun/star/container/XEnumerationAccess.hpp>
+#include <com/sun/star/drawing/XShapes.hpp>
+#include <com/sun/star/lang/XMultiServiceFactory.hpp>
 
 #include <comphelper/processfactory.hxx>
 #include <comphelper/propertysequence.hxx>
 #include <comphelper/sequenceashashmap.hxx>
 #include <test/unoapi_test.hxx>
+#include <rtl/ustrbuf.hxx>
 #include <unotools/tempfile.hxx>
+#include <vcl/svapp.hxx>
 #include <svx/unopage.hxx>
 #include <vcl/virdev.hxx>
 #include <svx/sdr/contact/displayinfo.hxx>
@@ -186,6 +194,73 @@ CPPUNIT_TEST_FIXTURE(UnodrawTest, testTitleShapeBullets)
     // Without the accompanying fix in place, this test would have failed, because the 2 paragraphs
     // were merged together (e.g. 1 bullet instead of 2 bullets for bulleted paragraphs).
     CPPUNIT_ASSERT(xTextE->hasMoreElements());
+}
+
+CPPUNIT_TEST_FIXTURE(UnodrawTest, testTextEnumerationConcurrentRelease)
+{
+    // A remote client's last release of a paragraph or portion runs on a URP thread, outside the
+    // SolarMutex, while the client's next createEnumeration() on the same shape may already be
+    // reusing that object from the edit source's range list (officelabs-project#340).
+    loadFromURL(u"private:factory/simpress"_ustr);
+    uno::Reference<lang::XMultiServiceFactory> xFactory(mxComponent, uno::UNO_QUERY);
+    uno::Reference<drawing::XShape> xShape(
+        xFactory->createInstance(u"com.sun.star.drawing.RectangleShape"_ustr), uno::UNO_QUERY);
+    uno::Reference<drawing::XDrawPagesSupplier> xSupplier(mxComponent, uno::UNO_QUERY);
+    uno::Reference<drawing::XShapes> xDrawPage(xSupplier->getDrawPages()->getByIndex(0),
+                                               uno::UNO_QUERY);
+    xDrawPage->add(xShape);
+    constexpr sal_Int32 nParagraphs = 16;
+    OUStringBuffer aString;
+    for (sal_Int32 i = 0; i < nParagraphs; ++i)
+    {
+        if (i)
+            aString.append(u'\n');
+        aString.append(OUString::number(i) + " paragraph text");
+    }
+    uno::Reference<text::XTextRange>(xShape, uno::UNO_QUERY_THROW)
+        ->setString(aString.makeStringAndClear());
+    uno::Reference<container::XEnumerationAccess> xText(xShape, uno::UNO_QUERY_THROW);
+
+    // Walks every paragraph and portion, holding on to each; returns the paragraph count.
+    auto walk = [&xText](std::vector<uno::Reference<uno::XInterface>>& rHeld) {
+        sal_Int32 nCount = 0;
+        uno::Reference<container::XEnumeration> xParas = xText->createEnumeration();
+        while (xParas->hasMoreElements())
+        {
+            uno::Reference<container::XEnumerationAccess> xPara(xParas->nextElement(),
+                                                                uno::UNO_QUERY_THROW);
+            rHeld.push_back(xPara);
+            ++nCount;
+            uno::Reference<container::XEnumeration> xPortions = xPara->createEnumeration();
+            while (xPortions->hasMoreElements())
+                rHeld.emplace_back(xPortions->nextElement(), uno::UNO_QUERY_THROW);
+        }
+        return nCount;
+    };
+
+    // Both sides run off the main thread with the SolarMutex free, as two URP threads would: one
+    // walks the shape again while the other drops the previous walk's references.
+    bool bAllCounted = true;
+    std::thread aClient([&walk, &bAllCounted] {
+        std::vector<uno::Reference<uno::XInterface>> aHeld;
+        walk(aHeld);
+        for (int i = 0; i < 2000; ++i)
+        {
+            std::thread aReleaser([&aHeld] { aHeld.clear(); });
+            std::vector<uno::Reference<uno::XInterface>> aNext;
+            if (walk(aNext) != nParagraphs)
+                bAllCounted = false;
+            aReleaser.join();
+            aHeld = std::move(aNext);
+        }
+    });
+    {
+        SolarMutexReleaser aRelease;
+        aClient.join();
+    }
+    // Without the accompanying fix in place, this test would have crashed: an enumeration reused a
+    // paragraph whose refcount had already reached zero, and kept it after it was freed.
+    CPPUNIT_ASSERT(bAllCounted);
 }
 
 CPPUNIT_TEST_FIXTURE(UnodrawTest, testPngExport)
