@@ -18,6 +18,8 @@
 
 using sfx2::sidebar::GetOLAppearanceMode;
 using sfx2::sidebar::OLTheme;
+using vcl::officelabs::GetOLColors;
+using vcl::officelabs::ParseOLTheme;
 using vcl::officelabs::ResolveOLTheme;
 
 namespace
@@ -136,6 +138,53 @@ public:
 };
 
 CPPUNIT_TEST_SUITE_REGISTRATION(OLThemeResolveTest);
+
+// The palette moved to vcl so the macOS settings merge can re-apply it
+// (officelabs-project#342); the name decides which palette.
+class OLThemePaletteTest : public CppUnit::TestFixture
+{
+    // GIVEN the theme name "midnight-blue" WHEN its palette is read THEN bg is 21222C and surface 282A36.
+    void testMidnightBluePalette()
+    {
+        OLTheme e = ParseOLTheme("midnight-blue");
+        CPPUNIT_ASSERT(e == OLTheme::MidnightBlue);
+        CPPUNIT_ASSERT_EQUAL(Color(0x21, 0x22, 0x2C), GetOLColors(e).bg);
+        CPPUNIT_ASSERT_EQUAL(Color(0x28, 0x2A, 0x36), GetOLColors(e).surface);
+    }
+
+    // GIVEN the theme name "dark" WHEN its palette is read THEN bg is 1A1A1A and surface 2A2A2A.
+    void testDarkPalette()
+    {
+        OLTheme e = ParseOLTheme("dark");
+        CPPUNIT_ASSERT(e == OLTheme::Dark);
+        CPPUNIT_ASSERT_EQUAL(Color(0x1A, 0x1A, 0x1A), GetOLColors(e).bg);
+        CPPUNIT_ASSERT_EQUAL(Color(0x2A, 0x2A, 0x2A), GetOLColors(e).surface);
+    }
+
+    // GIVEN the theme name "light" WHEN its palette is read THEN bg is FAFAFA and surface F0F1F3.
+    void testLightPalette()
+    {
+        OLTheme e = ParseOLTheme("light");
+        CPPUNIT_ASSERT(e == OLTheme::Light);
+        CPPUNIT_ASSERT_EQUAL(Color(0xFA, 0xFA, 0xFA), GetOLColors(e).bg);
+        CPPUNIT_ASSERT_EQUAL(Color(0xF0, 0xF1, 0xF3), GetOLColors(e).surface);
+    }
+
+    // GIVEN an unknown theme name WHEN parsed THEN it falls back to midnight-blue.
+    void testUnknownNameFallsBackToMidnightBlue()
+    {
+        CPPUNIT_ASSERT(ParseOLTheme("nonsense") == OLTheme::MidnightBlue);
+    }
+
+    CPPUNIT_TEST_SUITE(OLThemePaletteTest);
+    CPPUNIT_TEST(testMidnightBluePalette);
+    CPPUNIT_TEST(testDarkPalette);
+    CPPUNIT_TEST(testLightPalette);
+    CPPUNIT_TEST(testUnknownNameFallsBackToMidnightBlue);
+    CPPUNIT_TEST_SUITE_END();
+};
+
+CPPUNIT_TEST_SUITE_REGISTRATION(OLThemePaletteTest);
 }
 
 CPPUNIT_PLUGIN_IMPLEMENT();
