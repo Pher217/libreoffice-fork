@@ -668,8 +668,8 @@ void WebViewPanel::unobserveSidebarWindows()
     if (m_pObservedGrandParent)
         m_pObservedGrandParent->RemoveEventListener(
             LINK(this, WebViewPanel, SidebarWindowEventHdl));
-    m_pObservedParent.clear();
-    m_pObservedGrandParent.clear();
+    m_pObservedParent.reset();
+    m_pObservedGrandParent.reset();
 }
 
 IMPL_LINK(WebViewPanel, SidebarWindowEventHdl, VclWindowEvent&, rEvent, void)
