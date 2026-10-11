@@ -59,6 +59,7 @@
 #include <sfx2/viewfrm.hxx>
 #include <sfx2/viewsh.hxx>
 #include <vcl/svapp.hxx>
+#include <vcl/vclevent.hxx>
 #include <vcl/syschild.hxx>
 #include <vcl/sysdata.hxx>
 #include <sal/log.hxx>
@@ -558,6 +559,7 @@ WebViewPanel::~WebViewPanel()
     SAL_INFO("officelabs.cef", "WebViewPanel destroyed (detaching, NOT closing browser)");
 
     m_aResizeTimer.Stop();
+    unobserveSidebarWindows();
 
     // Unregister from the broadcast list
     auto it = std::find(s_allPanels.begin(), s_allPanels.end(), this);
@@ -627,6 +629,7 @@ void WebViewPanel::initOrReattachCefBrowser()
     }
 
     m_hFrameHandle = hFrameHandle;
+    observeSidebarWindows();
 
     // Check if this frame already has an active browser
     auto it = s_perFrameState.find(m_hFrameHandle);
@@ -639,6 +642,48 @@ void WebViewPanel::initOrReattachCefBrowser()
     {
         SAL_INFO("officelabs.cef", "initOrReattach: new frame — creating browser");
         initCefBrowser();
+    }
+}
+
+void WebViewPanel::observeSidebarWindows()
+{
+    unobserveSidebarWindows();
+    if (!m_pBinWindow)
+        return;
+    m_pObservedParent = m_pBinWindow->GetParent();
+    if (m_pObservedParent)
+    {
+        m_pObservedParent->AddEventListener(LINK(this, WebViewPanel, SidebarWindowEventHdl));
+        m_pObservedGrandParent = m_pObservedParent->GetParent();
+        if (m_pObservedGrandParent)
+            m_pObservedGrandParent->AddEventListener(
+                LINK(this, WebViewPanel, SidebarWindowEventHdl));
+    }
+}
+
+void WebViewPanel::unobserveSidebarWindows()
+{
+    if (m_pObservedParent)
+        m_pObservedParent->RemoveEventListener(LINK(this, WebViewPanel, SidebarWindowEventHdl));
+    if (m_pObservedGrandParent)
+        m_pObservedGrandParent->RemoveEventListener(
+            LINK(this, WebViewPanel, SidebarWindowEventHdl));
+    m_pObservedParent.clear();
+    m_pObservedGrandParent.clear();
+}
+
+IMPL_LINK(WebViewPanel, SidebarWindowEventHdl, VclWindowEvent&, rEvent, void)
+{
+    switch (rEvent.GetId())
+    {
+        case VclEventId::WindowResize:
+        case VclEventId::WindowMove:
+        case VclEventId::WindowShow:
+        case VclEventId::WindowHide:
+            syncCefWindowSize();
+            break;
+        default:
+            break;
     }
 }
 
@@ -845,13 +890,23 @@ void WebViewPanel::syncCefWindowSize()
 
     // --- Position and size ---
     Size aSize = pParent->GetSizePixel();
-    auto aScrPos = pParent->OutputToAbsoluteScreenPixel(Point(0, 0));
 
-    // setBounds() performs the full native sync (fullscreen guard, minimized
-    // check, z-order, actual apply) — see the platform host implementations.
-    // Always called; a native no-op when nothing actually changed.
-    m_pNativeHost->setBounds(static_cast<int>(aScrPos.X()), static_cast<int>(aScrPos.Y()),
-                             aSize.Width(), aSize.Height());
+    // Frame-relative position first: OutputToScreenPixel() is relative to the
+    // frame's client area, unlike the Absolute variant, which adds VCL's
+    // cached frame origin and lags a live drag (#346). Hosts that position
+    // this way (macOS) never see a screen coordinate.
+    auto aFramePos = pParent->OutputToScreenPixel(Point(0, 0));
+    if (!m_pNativeHost->setBoundsInFrame(static_cast<int>(aFramePos.X()),
+                                         static_cast<int>(aFramePos.Y()),
+                                         aSize.Width(), aSize.Height()))
+    {
+        // setBounds() performs the full native sync (fullscreen guard,
+        // minimized check, z-order, actual apply) — see the platform host
+        // implementations. Always called; a native no-op when nothing changed.
+        auto aScrPos = pParent->OutputToAbsoluteScreenPixel(Point(0, 0));
+        m_pNativeHost->setBounds(static_cast<int>(aScrPos.X()), static_cast<int>(aScrPos.Y()),
+                                 aSize.Width(), aSize.Height());
+    }
 
     // NOTE: m_browser may be null during first few seconds (async creation),
     // so this is a best-effort notification, matching the pre-refactor code.
@@ -862,6 +917,8 @@ void WebViewPanel::syncCefWindowSize()
     }
 }
 
+// Slow fallback only: geometry changes are applied synchronously by
+// SidebarWindowEventHdl and the native host's frame observers.
 IMPL_LINK_NOARG(WebViewPanel, ResizeTimerHdl, Timer*, void)
 {
     SfxViewShell* pViewShell = nullptr;

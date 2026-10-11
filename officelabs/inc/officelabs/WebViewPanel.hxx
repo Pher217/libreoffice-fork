@@ -54,6 +54,7 @@
 #include <memory>
 
 class SfxBindings;
+class VclWindowEvent;
 class SfxViewShell;
 
 namespace officelabs {
@@ -129,11 +130,22 @@ private:
     void reattachCefBrowser();
 
     DECL_LINK(ResizeTimerHdl, Timer*, void);
+    DECL_LINK(SidebarWindowEventHdl, VclWindowEvent&, void);
+
+    void observeSidebarWindows();
+    void unobserveSidebarWindows();
 
     SfxBindings* m_pBindings;
 
     // VclBin created via CreateChildFrame() inside the weld container
     VclPtr<vcl::Window> m_pBinWindow;
+
+    // The sidebar windows whose VCL Resize/Move/Show/Hide drive a synchronous
+    // syncCefWindowSize() (the macOS equivalent of the Windows frame
+    // subclass). syncCefWindowSize() sizes to the parent or, when taller, the
+    // grandparent, so both are observed.
+    VclPtr<vcl::Window> m_pObservedParent;
+    VclPtr<vcl::Window> m_pObservedGrandParent;
 
     // Non-owning: points into s_perFrameState[m_hFrameHandle].host, which
     // owns the actual native CEF host window/view and survives panel
@@ -149,7 +161,8 @@ private:
     NativeWindowHandle m_hFrameHandle = nullptr;
 
     // Resize tracking: timer polls for container size changes (fallback
-    // when the native frame-tracking hook doesn't fire, e.g. mac for now).
+    // when the native frame-tracking hook doesn't fire; the only driver of
+    // geometry sync is no longer this timer on mac, see observeSidebarWindows()).
     Timer m_aResizeTimer{ "officelabs::WebViewPanel resize" };
 
     // Grace period after reattach: number of timer ticks during which

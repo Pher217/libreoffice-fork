@@ -100,6 +100,13 @@ public:
     /// Windows behavior this preserves.
     virtual void setBounds(int x, int y, int w, int h) = 0;
 
+    /// Window-relative variant: x,y are top-left pixels relative to the
+    /// frame's own client area, so no screen coordinate (and no cached VCL
+    /// frame position that lags a live drag) is involved. Returns false when
+    /// the platform host does not position this way, in which case the caller
+    /// falls back to setBounds(). Only the macOS host overrides this.
+    virtual bool setBoundsInFrame(int /*x*/, int /*y*/, int /*w*/, int /*h*/) { return false; }
+
     virtual void show() = 0;
     virtual void hide() = 0;
 

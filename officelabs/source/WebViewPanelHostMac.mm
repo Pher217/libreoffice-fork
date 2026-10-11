@@ -15,15 +15,16 @@
  * VCL-thread contexts (ctor, postToVclThread() callbacks) -- so no
  * additional thread-hop is needed here.
  *
- * SCOPE (tonight): create/destroy/setBounds/show/hide/cefParent/setPanel
- * are implemented for real -- enough to link and do a basic embed.
+ * SCOPE: create/destroy/setBounds/setBoundsInFrame/show/hide/cefParent/setPanel
+ * are implemented for real. Positioning is window-relative (setBoundsInFrame):
+ * the sidebar rect arrives relative to the frame's client area and is only
+ * flipped against the superview's own height, never routed through screen
+ * coordinates, so VCL's cached (lagging) frame origin cannot misplace it
+ * during a live drag (#346). create() installs NSView frame-change and
+ * NSWindow move/resize observers that call onFrameMoved()/onFrameResized()
+ * synchronously; the 500 ms ResizeTimerHdl is a slow fallback only.
  * raiseAbove/keepBelowFullscreen/onFrameActivated/forwardKeyEvent/
- * forceFrameRelayout are deliberate no-ops with a rationale comment each;
- * onFrameMoved/onFrameResized delegate back to WebViewPanel::syncCefWindowSize()
- * (mirrors the Windows host) but nothing yet calls them on mac (no
- * NSView-frame-change / NSWindowDelegate observer is installed in create()
- * yet -- revisit once mac move/resize tracking is designed; the 500ms
- * ResizeTimerHdl polling fallback still runs regardless).
+ * forceFrameRelayout are deliberate no-ops with a rationale comment each.
  */
 
 #ifdef HAVE_FEATURE_CEF
@@ -84,6 +85,8 @@ public:
         // destroyInternal() for the matching teardown.
         m_pChildView = pChild;
 
+        installObservers();
+
         SAL_INFO("officelabs.cef", "WebViewPanelHostMac::create: child NSView attached");
         return static_cast<NativeWindowHandle>(m_pChildView);
     }
@@ -98,13 +101,10 @@ public:
         if (!m_pChildView)
             return;
 
-        // x,y,w,h are SCREEN-PIXEL, top-left origin (the VCL convention on
-        // every platform -- see INativeCefHost::setBounds()). Cocoa's
-        // screen space is bottom-left origin, so flip against the primary
-        // screen's height, then convert the resulting screen rect into our
-        // superview's local coordinate space via its NSWindow. Going
-        // through -convertRectFromScreen: (rather than a bare per-screen
-        // flip) keeps this correct across multi-monitor layouts.
+        // Screen-pixel fallback (top-left origin). WebViewPanel prefers
+        // setBoundsInFrame(), which never reaches this on mac; kept so the
+        // INativeCefHost contract still holds if a caller has only screen
+        // coordinates.
         NSArray<NSScreen*>* pScreens = [NSScreen screens];
         CGFloat primaryHeight = (pScreens.count > 0)
             ? pScreens[0].frame.size.height
@@ -118,7 +118,19 @@ public:
                                fromView:nil]
             : screenRect; // defensive fallback if not yet attached to a window
 
-        [m_pChildView setFrame:targetRect];
+        applyFrame(targetRect);
+    }
+
+    bool setBoundsInFrame(int x, int y, int w, int h) override
+    {
+        if (!m_pChildView || !m_pSuperview)
+            return false;
+
+        // x,y are top-left pixels inside the frame view; the frame view is
+        // not flipped, so only its own height is needed for the y-flip.
+        const CGFloat superHeight = m_pSuperview.bounds.size.height;
+        applyFrame(NSMakeRect(x, superHeight - (y + h), w, h));
+        return true;
     }
 
     void show() override
@@ -154,9 +166,8 @@ public:
     void onFrameMoved() override
     {
         // Mirrors the Windows host: ask the panel to recompute VCL geometry
-        // and re-sync. Nothing calls this on mac yet (see file header) --
-        // the 500ms ResizeTimerHdl poll in WebViewPanel.cxx is the fallback
-        // that currently drives resync on this platform.
+        // and re-sync. Driven synchronously by the observers installed in
+        // installObservers(); the 500ms ResizeTimerHdl is only a fallback.
         if (m_pPanel)
             m_pPanel->syncCefWindowSize();
     }
@@ -203,8 +214,66 @@ public:
     }
 
 private:
+    // No-op when the rect is unchanged: AppKit already moves a child view
+    // with its window, so a window drag changes nothing here.
+    void applyFrame(NSRect rect)
+    {
+        if (!NSEqualRects(m_pChildView.frame, rect))
+            [m_pChildView setFrame:rect];
+    }
+
+    void installObservers()
+    {
+        removeObservers();
+        NSNotificationCenter* pCenter = [NSNotificationCenter defaultCenter];
+        NSWindow* pWindow = [m_pSuperview window];
+        WebViewPanelHostMac* pThis = this;
+        void (^pHandler)(NSNotification*) = ^(NSNotification*) {
+            pThis->onFrameMoved();
+        };
+
+        // Drag start (WillMove) and live-resize start / per-event moves:
+        // each ends in syncCefWindowSize(), which also sends CEF
+        // NotifyMoveOrResizeStarted so its screen position stays current.
+        NSArray<NSString*>* pWindowNames = @[
+            NSWindowWillMoveNotification, NSWindowDidMoveNotification,
+            NSWindowDidResizeNotification, NSWindowWillStartLiveResizeNotification,
+            NSWindowDidEndLiveResizeNotification, NSWindowDidChangeScreenNotification,
+            NSWindowDidChangeBackingPropertiesNotification,
+            NSWindowDidEnterFullScreenNotification, NSWindowDidExitFullScreenNotification
+        ];
+        m_aObservers = [[NSMutableArray alloc] init];
+        if (pWindow)
+        {
+            for (NSString* pName in pWindowNames)
+                [m_aObservers addObject:[pCenter addObserverForName:pName
+                                                             object:pWindow
+                                                              queue:nil
+                                                         usingBlock:pHandler]];
+        }
+        [m_pSuperview setPostsFrameChangedNotifications:YES];
+        [m_aObservers addObject:[pCenter addObserverForName:NSViewFrameDidChangeNotification
+                                                     object:m_pSuperview
+                                                      queue:nil
+                                                 usingBlock:pHandler]];
+    }
+
+    void removeObservers()
+    {
+        if (!m_aObservers)
+            return;
+        NSNotificationCenter* pCenter = [NSNotificationCenter defaultCenter];
+        for (id pToken in m_aObservers)
+            [pCenter removeObserver:pToken];
+#if !__has_feature(objc_arc)
+        [m_aObservers release];
+#endif
+        m_aObservers = nil;
+    }
+
     void destroyInternal()
     {
+        removeObservers();
         if (m_pChildView)
         {
             [m_pChildView removeFromSuperview];
@@ -219,6 +288,7 @@ private:
     WebViewPanel* m_pPanel = nullptr;
     NSView* m_pSuperview = nullptr; // non-owning: the LO frame's view
     NSView* m_pChildView = nullptr; // owning: the CEF host view
+    NSMutableArray* m_aObservers = nil; // owning: NSNotificationCenter tokens
 };
 
 std::unique_ptr<INativeCefHost> createNativeCefHost(WebViewPanel* pPanel)
