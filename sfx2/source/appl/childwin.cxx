@@ -23,6 +23,8 @@
 #include <com/sun/star/frame/XFrame.hpp>
 #include <com/sun/star/util/XCloseable.hpp>
 #include <com/sun/star/beans/NamedValue.hpp>
+#include <comphelper/lok.hxx>
+#include <comphelper/scopeguard.hxx>
 #include <comphelper/string.hxx>
 #include <cppuhelper/implbase.hxx>
 #include <sal/log.hxx>
@@ -38,6 +40,7 @@
 #include <sfx2/dockwin.hxx>
 #include <sfx2/dispatch.hxx>
 #include <workwin.hxx>
+#include <sidebar/SidebarInitialVisibility.hxx>
 
 #include <sfx2/sfxsids.hrc>
 #include <o3tl/string_view.hxx>
@@ -355,6 +358,15 @@ sal_uInt16 SfxChildWindow::GetPosition() const
 
 void SfxChildWindow::InitializeChildWinFactory_Impl(sal_uInt16 nId, SfxChildWinInfo& rInfo)
 {
+    // OfficeLabs: a guard, so it also applies after every early return below
+    // (officelabs-project#350).
+    comphelper::ScopeGuard aOpenSidebar(
+        [nId, &rInfo]
+        {
+            rInfo.bVisible = sfx2::sidebar::ResolveInitialChildWindowVisibility(
+                nId, rInfo.bVisible, comphelper::LibreOfficeKit::isActive());
+        });
+
     // load configuration
 
     std::optional<SvtViewOptions> xWinOpt;
