@@ -123,6 +123,12 @@
                 && ! [pResponder isKindOfClass: [SalFrameView class]]
                 && [static_cast<NSView*>(pResponder) isDescendantOf: [pKeyWin contentView]] )
             {
+                // Send Cmd-C/V/X/A/Z straight to the embedded view. Left to the
+                // main menu, a key whose Edit item is disabled for the document
+                // (Copy with nothing selected there) is dropped, so the sidebar
+                // could paste but never copy (officelabs-core#177).
+                if( [SalNSMenu dispatchSpecialKeyEquivalents: pEvent] )
+                    return;
                 [super sendEvent: pEvent];
                 return;
             }
