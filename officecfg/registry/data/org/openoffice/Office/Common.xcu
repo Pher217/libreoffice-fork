@@ -402,6 +402,10 @@
     </node>
   </node>
   <node oor:name="Misc">
+    <!-- OfficeLabs: no Tip of the Day over the sidebar (project#357). -->
+    <prop oor:name="ShowTipOfTheDay">
+      <value>false</value>
+    </prop>
     <prop oor:name="UseSystemColorDialog">
     </prop>
     <prop oor:name="UseSystemFileDialog">

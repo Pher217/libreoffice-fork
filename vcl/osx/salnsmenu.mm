@@ -262,6 +262,32 @@
                 pKeyEvent = [NSEvent keyEventWithType: NSEventTypeKeyDown location: aPoint modifierFlags: nModMask timestamp: [[NSProcessInfo processInfo] systemUptime] windowNumber: [pKeyWin windowNumber] context: nil characters: pCharacters charactersIgnoringModifiers: pCharacters isARepeat: NO keyCode: 0];
             }
 
+            // The OfficeLabs CEF sidebar is a foreign NSView embedded in this
+            // frame's window (officelabs/source/WebViewPanelHostMac.mm). Blink
+            // returns Cmd-C/V/X/A/Z unhandled and expects the Edit menu to send
+            // the action to the first responder, so when that responder is an
+            // embedded view, forwarding the key to the SalFrameView would copy,
+            // paste or undo in the document instead (officelabs-core#177).
+            NSResponder* pResponder = [pKeyWin firstResponder];
+            if( [pResponder isKindOfClass: [NSView class]]
+                && ! [pResponder isKindOfClass: [SalFrameView class]]
+                && [static_cast<NSView*>(pResponder) isDescendantOf: [pKeyWin contentView]] )
+            {
+                SEL aAction = nil;
+                if( [pCharacters isEqualToString: @"v"] )
+                    aAction = @selector(paste:);
+                else if( [pCharacters isEqualToString: @"c"] )
+                    aAction = @selector(copy:);
+                else if( [pCharacters isEqualToString: @"x"] )
+                    aAction = @selector(cut:);
+                else if( [pCharacters isEqualToString: @"a"] )
+                    aAction = @selector(selectAll:);
+                else
+                    aAction = @selector(undo:);
+                [NSApp sendAction: aAction to: nil from: self];
+                return;
+            }
+
             [[pKeyWin contentView] keyDown: pKeyEvent];
             return;
         }
