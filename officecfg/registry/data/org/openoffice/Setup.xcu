@@ -37,8 +37,17 @@
     <prop oor:name="ooSetupExtension">
       <value>${PRODUCTEXTENSION}</value>
     </prop>
+    <!-- OfficeLabs: no first-start Welcome dialog; the macOS app has no launcher to suppress it (project#357). -->
+    <prop oor:name="WhatsNew">
+      <value>false</value>
+    </prop>
   </node>
   <node oor:name="Office">
+    <!-- OfficeLabs: the bundled agent drives the office over this acceptor. Byte-identical to the
+         Windows launcher's accept argument, so the acceptor map dedupes it there (project#355). -->
+    <prop oor:name="ooSetupConnectionURL">
+      <value>socket,host=localhost,port=2002;urp;StarOffice.ServiceManager</value>
+    </prop>
     <node oor:name="Factories">
       <node oor:name="com.sun.star.sheet.SpreadsheetDocument" oor:op="replace" install:module="calc">
         <prop oor:name="ooSetupFactoryDocumentService" oor:finalized="true">
