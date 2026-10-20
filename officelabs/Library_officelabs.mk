@@ -57,6 +57,7 @@ $(eval $(call gb_Library_use_externals,officelabs,\
 $(eval $(call gb_Library_add_exception_objects,officelabs,\
     officelabs/source/AgentIdentity \
     officelabs/source/BundledAgent \
+    officelabs/source/CefCachePath \
     officelabs/source/CefDebugPort \
     officelabs/source/DocumentController \
     officelabs/source/InlineCompletionEligibility \
