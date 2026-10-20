@@ -20,6 +20,7 @@
 #endif
 
 #include <officelabs/BundledAgent.hxx>
+#include <officelabs/CefCachePath.hxx>
 #include <officelabs/CefDebugPort.hxx>
 #include <officelabs/CefInit.hxx>
 #include <officelabs/WebViewPanel.hxx>
@@ -32,6 +33,7 @@
 #include <vcl/svapp.hxx>
 #include <osl/file.hxx>
 #include <osl/module.hxx>
+#include <osl/process.h>
 #include <rtl/bootstrap.hxx>
 
 #include <com/sun/star/frame/Desktop.hpp>
@@ -45,6 +47,7 @@
 
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 #include <officelabs/OfficelabsBrowserApp.hxx>
 
@@ -92,6 +95,35 @@ public:
     // XEventListener
     void SAL_CALL disposing(const css::lang::EventObject&) override {}
 };
+
+// The LibreOffice profile directory as a system path when the profile was
+// chosen explicitly, empty for the default profile (see CefCachePath.hxx).
+std::string explicitProfileDir()
+{
+    std::vector<std::string> aArgs;
+    const sal_uInt32 nArgs = osl_getCommandArgCount();
+    for (sal_uInt32 i = 0; i < nArgs; ++i)
+    {
+        OUString sArg;
+        osl_getCommandArg(i, &sArg.pData);
+        aArgs.emplace_back(sArg.toUtf8());
+    }
+    if (!officelabs::hasUserInstallationOverride(aArgs, std::getenv("UserInstallation")))
+        return {};
+
+    OUString sUrl;
+    OUString sPath;
+    if (!rtl::Bootstrap::get(u"UserInstallation"_ustr, sUrl))
+        return {};
+    rtl::Bootstrap::expandMacros(sUrl);
+    if (osl::FileBase::getSystemPathFromFileURL(sUrl, sPath) != osl::FileBase::E_None)
+    {
+        SAL_WARN("officelabs.cef", "Cannot resolve UserInstallation " << sUrl
+                 << " - sharing the default CEF cache");
+        return {};
+    }
+    return std::string(sPath.toUtf8());
+}
 
 } // anonymous namespace
 
@@ -195,15 +227,25 @@ bool CefInit::initialize()
     // Persistent cache — enables localStorage across CEF browser restarts.
     // Without this, CEF runs in "incognito mode" and localStorage is lost
     // when the sidebar panel is recreated (e.g. during OLE chart activation).
+    // The root holds Chromium's single-instance lock, so it is per LibreOffice
+    // profile: a shared one blanks the second office's sidebar and opens a
+    // chrome://newtab window in the first (project#367, CefCachePath.hxx).
+    const std::string profileDir = explicitProfileDir();
 #ifdef _WIN32
     {
         const char* localAppData = std::getenv("LOCALAPPDATA");
-        if (localAppData)
+        const std::string rootCache = cefRootCachePath(
+            localAppData ? std::string(localAppData) + "\\OfficeLabs\\cef_data" : std::string(),
+            profileDir, '\\');
+        if (!rootCache.empty())
         {
-            std::string rootCache = std::string(localAppData) + "\\OfficeLabs\\cef_data";
             std::string profileCache = rootCache + "\\Default";
-            CefString(&settings.root_cache_path).FromASCII(rootCache.c_str());
-            CefString(&settings.cache_path).FromASCII(profileCache.c_str());
+            OUString sCacheUrl;
+            if (osl::FileBase::getFileURLFromSystemPath(OUString::fromUtf8(profileCache), sCacheUrl)
+                == osl::FileBase::E_None)
+                osl::Directory::createPath(sCacheUrl); // E_EXIST is fine
+            CefString(&settings.root_cache_path).FromString(rootCache);
+            CefString(&settings.cache_path).FromString(profileCache);
             SAL_INFO("officelabs.cef", "CEF cache: " << rootCache);
         }
     }
@@ -215,10 +257,12 @@ bool CefInit::initialize()
         // directories, and a missing cache_path forces incognito mode and loses
         // localStorage on the first run, so create the dirs up front.
         const char* home = std::getenv("HOME");
-        if (home)
+        const std::string rootCache = cefRootCachePath(
+            home ? std::string(home) + "/Library/Application Support/OfficeLabs/cef_data"
+                 : std::string(),
+            profileDir, '/');
+        if (!rootCache.empty())
         {
-            std::string rootCache =
-                std::string(home) + "/Library/Application Support/OfficeLabs/cef_data";
             std::string profileCache = rootCache + "/Default";
 
             auto mkdirp = [](const std::string& path) {
@@ -230,8 +274,8 @@ bool CefInit::initialize()
             mkdirp(rootCache);
             mkdirp(profileCache);
 
-            CefString(&settings.root_cache_path).FromASCII(rootCache.c_str());
-            CefString(&settings.cache_path).FromASCII(profileCache.c_str());
+            CefString(&settings.root_cache_path).FromString(rootCache);
+            CefString(&settings.cache_path).FromString(profileCache);
             SAL_INFO("officelabs.cef", "CEF cache: " << rootCache);
         }
         else

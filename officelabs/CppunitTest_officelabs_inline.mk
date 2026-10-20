@@ -16,6 +16,7 @@ $(eval $(call gb_CppunitTest_set_include,officelabs_inline,\
 
 $(eval $(call gb_CppunitTest_add_exception_objects,officelabs_inline, \
 	officelabs/qa/cppunit/test_inline_eligibility \
+	officelabs/qa/cppunit/test_cef_cache_path \
 	officelabs/qa/cppunit/test_cef_debug_port \
 	officelabs/qa/cppunit/test_bundled_agent \
 ))
