@@ -42,6 +42,10 @@
       <value install:module="macosx">MAC</value>
       <value install:module="wnt">WIN</value>
     </prop>
+    <!-- OfficeLabs: no "Help not installed" pop-up; we ship no help pack and help opens online (project#302, project#303). -->
+    <prop oor:name="BuiltInHelpNotInstalledPopUp">
+      <value>false</value>
+    </prop>
   </node>
   <node oor:name="VCL">
     <prop oor:name="UseSkia" oor:type="xs:boolean">
