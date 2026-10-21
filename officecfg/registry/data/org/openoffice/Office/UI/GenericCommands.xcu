@@ -5787,8 +5787,9 @@ bit 3 (0x8): #define UICOMMANDDESCRIPTION_PROPERTIES_TOGGLEBUTTON 8
         </prop>
       </node>
       <node oor:name=".uno:Documentation" oor:op="replace">
+        <!-- OfficeLabs: this item opens LibreOffice's online help; F1 (.uno:HelpIndex) opens ours (project#303). -->
         <prop oor:name="Label" oor:type="xs:string">
-          <value xml:lang="en-US">~User Guides</value>
+          <value xml:lang="en-US">~LibreOffice Help</value>
         </prop>
         <prop oor:name="Properties" oor:type="xs:int">
           <value>1</value>
