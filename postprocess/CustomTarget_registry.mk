@@ -228,6 +228,7 @@ postprocess_FILES_main := \
 	$(postprocess_XCU)/Office/Math.xcu \
 	$(postprocess_XCU)/Office/Paths.xcu \
 	$(postprocess_XCU)/Office/ProtocolHandler.xcu \
+	$(postprocess_XCU)/Office/Recovery.xcu \
 	$(postprocess_XCU)/Office/Security.xcu \
 	$(postprocess_XCU)/Office/TableWizard.xcu \
 	$(postprocess_XCU)/Office/UI/BaseWindowState.xcu \
