@@ -342,8 +342,9 @@
     <prop oor:name="QA_URL" oor:type="xs:string">
       <value>https://hub.libreoffice.org/forum/</value>
     </prop>
+    <!-- OfficeLabs: "LibreOffice Help" opens LibreOffice's online help (project#303). -->
     <prop oor:name="DocumentationURL" oor:type="xs:string">
-      <value>https://hub.libreoffice.org/documentation/</value>
+      <value>https://help.libreoffice.org/latest/index.html</value>
     </prop>
     <prop oor:name="GetInvolvedURL" oor:type="xs:string">
       <value>https://hub.libreoffice.org/joinus/</value>

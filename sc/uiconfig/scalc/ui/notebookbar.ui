@@ -782,13 +782,6 @@
       </object>
     </child>
     <child>
-      <object class="GtkMenuItem" id="MenuHelp-ExtendedHelp">
-        <property name="visible">True</property>
-        <property name="can_focus">False</property>
-        <property name="action_name">.uno:ExtendedHelp</property>
-      </object>
-    </child>
-    <child>
       <object class="GtkMenuItem" id="MenuHelp-Documentation">
         <property name="visible">True</property>
         <property name="can_focus">False</property>
@@ -797,58 +790,6 @@
     </child>
     <child>
       <object class="GtkSeparatorMenuItem" id="MenuHelp-separator">
-        <property name="visible">True</property>
-        <property name="can_focus">False</property>
-      </object>
-    </child>
-    <child>
-      <object class="GtkMenuItem" id="MenuHelp-QuestionAnswers">
-        <property name="visible">True</property>
-        <property name="can_focus">False</property>
-        <property name="action_name">.uno:QuestionAnswers</property>
-      </object>
-    </child>
-    <child>
-      <object class="GtkMenuItem" id="MenuHelp-SendFeedback">
-        <property name="visible">True</property>
-        <property name="can_focus">False</property>
-        <property name="action_name">.uno:SendFeedback</property>
-      </object>
-    </child>
-    <child>
-      <object class="GtkSeparatorMenuItem" id="MenuHelp-separator1">
-        <property name="visible">True</property>
-        <property name="can_focus">False</property>
-      </object>
-    </child>
-    <child>
-      <object class="GtkMenuItem" id="MenuHelp-SafeMode">
-        <property name="visible">True</property>
-        <property name="can_focus">False</property>
-        <property name="action_name">.uno:SafeMode</property>
-      </object>
-    </child>
-    <child>
-      <object class="GtkSeparatorMenuItem" id="MenuHelp-separator2">
-        <property name="visible">True</property>
-        <property name="can_focus">False</property>
-      </object>
-    </child>
-    <child>
-      <object class="GtkSeparatorMenuItem" id="MenuHelp-separator3">
-        <property name="visible">True</property>
-        <property name="can_focus">False</property>
-      </object>
-    </child>
-    <child>
-      <object class="GtkMenuItem" id="MenuHelp-ShowLicense">
-        <property name="visible">True</property>
-        <property name="can_focus">False</property>
-        <property name="action_name">.uno:ShowLicense</property>
-      </object>
-    </child>
-    <child>
-      <object class="GtkSeparatorMenuItem" id="MenuHelp-separator4">
         <property name="visible">True</property>
         <property name="can_focus">False</property>
       </object>
