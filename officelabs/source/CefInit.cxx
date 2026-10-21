@@ -151,6 +151,12 @@ bool CefInit::initialize()
     if (m_bInitialized)
         return true;
 
+    // CEF cannot be initialised twice in one process: a second CefInitialize()
+    // after a failed one segfaults inside the framework, and the sidebar
+    // recreates its panels on every context change (project#368).
+    if (m_bFailed)
+        return false;
+
     // Headless runs (--headless, unit tests) have no real native frames: on Windows the
     // headless frame handle is not an HWND, and CEF aborts creating a child of it.
     if (Application::IsHeadlessModeEnabled())
@@ -174,6 +180,7 @@ bool CefInit::initialize()
             SAL_WARN("officelabs.cef",
                      "CefScopedLibraryLoader::LoadInMain() FAILED");
             g_oLibraryLoader.reset();
+            m_bFailed = true;
             return false;
         }
         SAL_INFO("officelabs.cef", "CEF framework loaded (LoadInMain)");
@@ -307,6 +314,7 @@ bool CefInit::initialize()
     if (!bCefInitOk)
     {
         SAL_WARN("officelabs.cef", "CefInitialize() FAILED");
+        m_bFailed = true;
         return false;
     }
 

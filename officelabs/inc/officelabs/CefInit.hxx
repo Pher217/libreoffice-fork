@@ -49,6 +49,8 @@ private:
     CefInit& operator=(const CefInit&) = delete;
 
     bool m_bInitialized;
+    /// Set once CEF has failed to start; initialize() then never retries.
+    bool m_bFailed = false;
     std::mutex m_mutex;
     /// Guards against shutdown() re-entering itself. closeStudioWindowAndWait()
     /// pumps the native run loop on macOS, so an event delivered during that

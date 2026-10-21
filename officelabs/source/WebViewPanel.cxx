@@ -533,7 +533,9 @@ WebViewPanel::WebViewPanel(weld::Widget* pParent, SfxBindings* pBindings)
     bool bCefOk = CefInit::instance().initialize();
     if (!bCefOk)
     {
-        SAL_WARN("officelabs.cef", "CEF init failed - panel will be blank");
+        SAL_WARN("officelabs.cef", "CEF init failed - showing the error label");
+        m_xBuilder->weld_widget(u"cef_container"_ustr)->hide();
+        m_xBuilder->weld_label(u"cef_error"_ustr)->show();
         return;
     }
 
