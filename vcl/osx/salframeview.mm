@@ -508,9 +508,48 @@ static NSString* getCurrentSelection()
     return [super canBecomeKeyWindow];
 }
 
+// --- OfficeLabs DIAGNOSTIC, project#192 -------------------------------------
+// Records macOS key-status transitions so the ~2 s idle focus flap can be
+// measured and the window that takes key status can be named. Inert unless
+// OFFICELABS_FOCUS_TRACE is set to a writable path. REVERT BEFORE COMMITTING.
+#include <mach/mach_time.h>
+
+static void OfficeLabsFocusTrace( const char* pWhat )
+{
+    static const char* pPath = getenv( "OFFICELABS_FOCUS_TRACE" );
+    if( !pPath )
+        return;
+
+    static mach_timebase_info_data_t aTB = { 0, 0 };
+    if( aTB.denom == 0 )
+        mach_timebase_info( &aTB );
+    const uint64_t nNs = mach_absolute_time() * aTB.numer / aTB.denom;
+
+    NSWindow* pKey = [NSApp keyWindow];
+    NSString* pKeyDesc = pKey
+        ? [NSString stringWithFormat: @"%@/%p/%@", [pKey className], pKey,
+                                      [pKey title] ?: @"(untitled)"]
+        : @"(none)";
+    NSRunningApplication* pFront = [[NSWorkspace sharedWorkspace] frontmostApplication];
+
+    FILE* fp = fopen( pPath, "a" );
+    if( !fp )
+        return;
+    fprintf( fp, "%s\tmono_ns=%llu\tkeyWindow=%s\tappActive=%d\tfrontmost=%s\tnWindows=%lu\n",
+             pWhat,
+             static_cast<unsigned long long>( nNs ),
+             [pKeyDesc UTF8String],
+             [NSApp isActive] ? 1 : 0,
+             pFront ? [[pFront bundleIdentifier] ?: @"(nil)" UTF8String] : "(nil)",
+             static_cast<unsigned long>( [[NSApp windows] count] ) );
+    fclose( fp );
+}
+// --- end OfficeLabs DIAGNOSTIC ---------------------------------------------
+
 -(void)windowDidBecomeKey: (NSNotification*)pNotification
 {
     (void)pNotification;
+    OfficeLabsFocusTrace( "BECOME" );
     SolarMutexGuard aGuard;
 
     if( mpFrame && AquaSalFrame::isAlive( mpFrame ) )
@@ -549,6 +588,7 @@ static NSString* getCurrentSelection()
 -(void)windowDidResignKey: (NSNotification*)pNotification
 {
     (void)pNotification;
+    OfficeLabsFocusTrace( "RESIGN" );
     SolarMutexGuard aGuard;
 
     // Commit any uncommitted text and cancel the native input method session
