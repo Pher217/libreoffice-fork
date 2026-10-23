@@ -32,6 +32,8 @@
 #include <osx/saldata.hxx>
 #include <osx/salframe.h>
 #include <osx/salframeview.h>
+#include <osx/salinst.h>
+#include <osx/runinmain.hxx>
 
 #include <premac.h>
 #include <Carbon/Carbon.h>
@@ -259,9 +261,18 @@ bool AquaSalGraphics::drawNativeControl(ControlType nType,
                                         const tools::Rectangle &rControlRegion,
                                         ControlState nState,
                                         const ImplControlValue &aValue,
-                                        const OUString &,
-                                        const Color&)
+                                        const OUString &rCaption,
+                                        const Color &rBackgroundColor)
 {
+    // AppKit cells render through SwiftUI, which waits on the main thread. A
+    // UNO call arriving over URP paints on a request thread while holding the
+    // SolarMutex, and the main thread is waiting for that mutex: deadlock.
+    // Hand the drawing to the main thread, which services this block while
+    // it waits in SalYieldMutex::doAcquire.
+    OSX_SALDATA_RUNINMAIN_UNION(drawNativeControl(nType, nPart, rControlRegion, nState, aValue,
+                                                  rCaption, rBackgroundColor),
+                                boolean)
+
     // tdf#165266 Force native controls to use current effective appearance
     // +[NSAppearance setCurrentAppearance:] is deprecated and calling
     // that appears to do less and less with each new version of macos
