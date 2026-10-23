@@ -447,6 +447,11 @@ void WebViewPanel::broadcastSyncToAllPanels()
 void WebViewPanel::eraseFrameState(NativeWindowHandle hFrame)
 {
     s_perFrameState.erase(hFrame);
+
+    // The frame that just went away may be the one that opened the Studio
+    // window (OFFICELABS_STUDIO). No-op if the Studio isn't open, or is owned
+    // by a different frame -- see StudioWindow.hxx.
+    officelabs::closeStudioWindowForFrame(hFrame);
 }
 
 void WebViewPanel::cleanupPersistentBrowser()
@@ -677,7 +682,7 @@ void WebViewPanel::initCefBrowser()
     if (const char* pEnv = std::getenv("OFFICELABS_STUDIO"))
     {
         if (pEnv[0] == '1')
-            officelabs::openStudioWindow();
+            officelabs::openStudioWindow(m_hFrameHandle);
     }
 
     // Start resize tracking timer

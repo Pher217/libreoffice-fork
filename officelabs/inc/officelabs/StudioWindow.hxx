@@ -27,11 +27,29 @@ namespace officelabs
 {
 /** Open the Macro Studio window, or focus the existing one.
  *
+ * @param hOwnerFrame the native handle (HWND on Windows, NSView* on macOS --
+ * see officelabs::NativeWindowHandle) of the LO document frame requesting the
+ * Studio. Recorded only so closeStudioWindowForFrame() can close the Studio
+ * again when that same frame closes; passing the wrong handle only affects
+ * which frame's closing auto-closes the Studio, never document state.
+ *
  * Safe to call from any thread; marshals to the CEF UI thread itself. That
  * matters on Windows, where multi_threaded_message_loop makes the CEF UI thread
  * a different thread from LibreOffice's main thread.
  */
-void openStudioWindow();
+void openStudioWindow(void* hOwnerFrame);
+
+/** Close the Studio window if -- and only if -- it is currently owned by
+ * hFrame (the same handle passed to openStudioWindow() that created it).
+ * A no-op if the Studio is not open, or is owned by a different frame.
+ *
+ * Call this when hFrame's native handle is destroyed (the document/frame is
+ * closing), so the Studio does not outlive the document that opened it. Does
+ * not wait for the close to finish -- this is a fire-and-forget request, not
+ * the bounded shutdown wait that closeStudioWindowAndWait() below performs.
+ * Safe to call from any thread; marshals to the CEF UI thread itself.
+ */
+void closeStudioWindowForFrame(void* hFrame);
 
 /** Close the Studio window and wait for it to be gone.
  *

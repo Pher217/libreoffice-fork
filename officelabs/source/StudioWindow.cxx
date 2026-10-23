@@ -215,6 +215,25 @@ private:
     DISALLOW_COPY_AND_ASSIGN(StudioBrowserViewDelegate);
 };
 
+/// The native handle (HWND / NSView*, see officelabs::NativeWindowHandle) of
+/// the LO document frame that opened the current g_studioWindow, or nullptr
+/// if none is open. Read/written only on the CEF UI thread (same thread that
+/// owns g_studioWindow itself), so this needs no synchronization of its own.
+/// Lets closeStudioWindowForFrame() close the Studio when THAT frame closes,
+/// without giving the Studio any broader notion of "the current document".
+void* g_pStudioOwnerFrame = nullptr;
+
+/// Command id for the window-scoped Cmd+W (mac) / Ctrl+W (Windows/Linux)
+/// accelerator, below. The Studio is a bare CefWindow with no VCL frame of
+/// its own -- it is not part of LibreOffice's window/menu-bar model at all,
+/// while sharing the SAME NSApplication (and so the same main menu bar, and
+/// the same key-equivalent dispatch) as every LO document window. Without a
+/// window-scoped claim on Cmd+W, that key combination falls through to
+/// LibreOffice's own application-wide Close accelerator (.uno:CloseDoc on the
+/// shared menu), which closes whatever LO document frame LO itself currently
+/// considers active -- not this window, which the user actually has focused.
+constexpr int kCmdCloseStudioWindow = 1;
+
 class StudioWindowDelegate final : public CefWindowDelegate
 {
 public:
@@ -228,6 +247,17 @@ public:
         window->AddChildView(m_browserView);
         window->SetTitle("OfficeLabs Macro Studio");
         window->CenterWindow(CefSize(1400, 900));
+
+        // Claim Cmd+W/Ctrl+W as THIS window's own accelerator, at the highest
+        // priority CEF Views offers (high_priority=true -- see
+        // CefWindow::SetAccelerator's doc comment: the key event is then
+        // handled here before it can reach the web content or CefKeyboardHandler
+        // first). That is what stops it from ever becoming an unclaimed key
+        // event that the shared application menu bar picks up instead.
+        window->SetAccelerator(kCmdCloseStudioWindow, 'W', /*shift_pressed=*/false,
+                               /*ctrl_pressed=*/true, /*alt_pressed=*/false,
+                               /*high_priority=*/true);
+
         window->Show();
     }
 
@@ -241,21 +271,38 @@ public:
     bool CanResize(CefRefPtr<CefWindow>) override { return true; }
     bool CanClose(CefRefPtr<CefWindow>) override { return true; }
 
+    bool OnAccelerator(CefRefPtr<CefWindow> window, int command_id) override
+    {
+        if (command_id == kCmdCloseStudioWindow)
+        {
+            // Close THIS window only. Never touches the document -- there is
+            // no UNO dispatch, no .uno:CloseDoc, nothing document-shaped here.
+            window->Close();
+            return true;
+        }
+        return false;
+    }
+
 private:
     CefRefPtr<CefBrowserView> m_browserView;
     IMPLEMENT_REFCOUNTING(StudioWindowDelegate);
     DISALLOW_COPY_AND_ASSIGN(StudioWindowDelegate);
 };
 
-void createStudioWindowOnUiThread()
+void createStudioWindowOnUiThread(void* hOwnerFrame)
 {
     // Single instance: focus the existing window rather than opening a second.
+    // Deliberately NOT reassigning g_pStudioOwnerFrame here: the Studio stays
+    // bound to whichever document frame first opened it, so a second frame
+    // merely refocusing it does not adopt it -- see closeStudioWindowForFrame().
     if (g_studioWindow)
     {
         g_studioWindow->Show();
         g_studioWindow->RequestFocus();
         return;
     }
+
+    g_pStudioOwnerFrame = hOwnerFrame;
 
     const OUString sUrl = studioUrl();
     if (sUrl.isEmpty())
@@ -287,11 +334,12 @@ void createStudioWindowOnUiThread()
 class CreateStudioWindowTask final : public CefTask
 {
 public:
-    CreateStudioWindowTask() = default;
+    explicit CreateStudioWindowTask(void* hOwnerFrame) : m_hOwnerFrame(hOwnerFrame) {}
 
-    void Execute() override { createStudioWindowOnUiThread(); }
+    void Execute() override { createStudioWindowOnUiThread(m_hOwnerFrame); }
 
 private:
+    void* m_hOwnerFrame;
     IMPLEMENT_REFCOUNTING(CreateStudioWindowTask);
     DISALLOW_COPY_AND_ASSIGN(CreateStudioWindowTask);
 };
@@ -312,14 +360,49 @@ private:
     DISALLOW_COPY_AND_ASSIGN(CloseStudioWindowTask);
 };
 
+/// Closes the Studio only if it is currently owned by hFrame -- see
+/// g_pStudioOwnerFrame. Fire-and-forget: unlike closeStudioWindowAndWait(),
+/// nothing here needs to block until the close finishes, so this does not
+/// touch g_bBrowserClosed/g_bWindowDestroyed at all.
+class CloseStudioWindowForFrameTask final : public CefTask
+{
+public:
+    explicit CloseStudioWindowForFrameTask(void* hFrame) : m_hFrame(hFrame) {}
+
+    void Execute() override
+    {
+        if (g_studioWindow && g_pStudioOwnerFrame == m_hFrame)
+            g_studioWindow->Close();
+    }
+
+private:
+    void* m_hFrame;
+    IMPLEMENT_REFCOUNTING(CloseStudioWindowForFrameTask);
+    DISALLOW_COPY_AND_ASSIGN(CloseStudioWindowForFrameTask);
+};
+
 } // namespace
 
-void openStudioWindow()
+void openStudioWindow(void* hOwnerFrame)
 {
     if (CefCurrentlyOn(TID_UI))
-        createStudioWindowOnUiThread();
+        createStudioWindowOnUiThread(hOwnerFrame);
     else
-        CefPostTask(TID_UI, new CreateStudioWindowTask());
+        CefPostTask(TID_UI, new CreateStudioWindowTask(hOwnerFrame));
+}
+
+void closeStudioWindowForFrame(void* hFrame)
+{
+    if (!hFrame)
+        return;
+
+    if (CefCurrentlyOn(TID_UI))
+    {
+        if (g_studioWindow && g_pStudioOwnerFrame == hFrame)
+            g_studioWindow->Close();
+    }
+    else
+        CefPostTask(TID_UI, new CloseStudioWindowForFrameTask(hFrame));
 }
 
 void closeStudioWindowAndWait()
@@ -362,7 +445,8 @@ void closeStudioWindowAndWait()
 
 namespace officelabs
 {
-void openStudioWindow() {}
+void openStudioWindow(void*) {}
+void closeStudioWindowForFrame(void*) {}
 void closeStudioWindowAndWait() {}
 }
 
