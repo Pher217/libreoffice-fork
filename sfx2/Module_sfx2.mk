@@ -40,6 +40,7 @@ $(eval $(call gb_Module_add_check_targets,sfx2,\
     CppunitTest_sfx2_autoredaction \
     CppunitTest_sfx2_oltheme \
     CppunitTest_sfx2_sidebarvisibility \
+    CppunitTest_sfx2_sidebarrestoredwidth \
     CppunitTest_sfx2_oldocsurl \
 ))
 
