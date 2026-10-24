@@ -97,7 +97,40 @@ public:
                                                          EXPANDED_WIDTH));
     }
 
+    // GIVEN a collapsed split width whose horizontal size is already open
+    // WHEN it is restored
+    // THEN only the split width changes.
+    void testOnlyCollapsedSplitWidthChanges()
+    {
+        CPPUNIT_ASSERT_EQUAL(u"AL:(5,16,0/0/520/450,330;691)"_ustr,
+                             ExpandCollapsedSidebarWidth(u"AL:(5,16,0/0/520/450,35;691)"_ustr,
+                                                         OPEN_WIDTH, EXPANDED_WIDTH));
+    }
+
+    // GIVEN a split size without its ';' separator
+    // WHEN it is restored
+    // THEN it is returned unchanged.
+    void testSplitWithoutSemicolonIsKept()
+    {
+        CPPUNIT_ASSERT_EQUAL(u"AL:(5,16,0/0/35/450,35)"_ustr,
+                             ExpandCollapsedSidebarWidth(u"AL:(5,16,0/0/35/450,35)"_ustr,
+                                                         OPEN_WIDTH, EXPANDED_WIDTH));
+    }
+
+    // GIVEN a negative split width, which SfxDockingWindow rejects
+    // WHEN it is restored
+    // THEN it is returned unchanged.
+    void testNegativeWidthIsKept()
+    {
+        CPPUNIT_ASSERT_EQUAL(u"AL:(5,16,0/0/35/450,-1;691)"_ustr,
+                             ExpandCollapsedSidebarWidth(u"AL:(5,16,0/0/35/450,-1;691)"_ustr,
+                                                         OPEN_WIDTH, EXPANDED_WIDTH));
+    }
+
     CPPUNIT_TEST_SUITE(SidebarRestoredWidthTest);
+    CPPUNIT_TEST(testOnlyCollapsedSplitWidthChanges);
+    CPPUNIT_TEST(testSplitWithoutSemicolonIsKept);
+    CPPUNIT_TEST(testNegativeWidthIsKept);
     CPPUNIT_TEST(testCollapsedWidthIsExpanded);
     CPPUNIT_TEST(testWidthBelowOpenThresholdIsExpanded);
     CPPUNIT_TEST(testOpenWidthIsKept);
