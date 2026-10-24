@@ -25,6 +25,7 @@
 #include <sfx2/sfxsids.hrc>
 #include <helpids.h>
 #include <comphelper/lok.hxx>
+#include <sidebar/SidebarRestoredWidth.hxx>
 
 namespace sfx2::sidebar {
 
@@ -56,6 +57,13 @@ SidebarChildWindow::SidebarChildWindow(vcl::Window* pParentWindow, sal_uInt16 nI
     // paragraph-properties panel and is not tuned for a chat surface; picking
     // a deliberate width is deferred until it can be measured against the real
     // window rather than guessed.
+    //
+    // The same applies to a sidebar the user collapsed in an earlier session:
+    // its persisted width would reopen the deck closed (officelabs-project#352).
+    if (pInfo && !comphelper::LibreOfficeKit::isActive())
+        pInfo->aExtraString = ExpandCollapsedSidebarWidth(
+            pInfo->aExtraString, TabBar::GetDefaultWidth() + SIDEBAR_DECK_OPEN_THRESHOLD,
+            GetDefaultWidth(pDockWin));
 
     pDockWin->Initialize(pInfo);
 
