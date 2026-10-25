@@ -21,6 +21,7 @@
 #include <officelabs/DocumentController.hxx>
 #include <officelabs/AgentIdentity.hxx>
 #include <officelabs/ConsentBridge.hxx>
+#include <officelabs/InlineCompletionEligibility.hxx>
 
 #include <vcl/officelabstheme.hxx>
 
@@ -298,6 +299,13 @@ bool WebViewMessageHandler::OnQuery(
         || req.find("\"type\": \"openExternalUrl\"") != std::string::npos)
     {
         handleOpenExternalUrl(req, callback);
+        return true;
+    }
+
+    if (req.find("\"type\":\"authStateChanged\"") != std::string::npos
+        || req.find("\"type\": \"authStateChanged\"") != std::string::npos)
+    {
+        handleAuthStateChanged(callback);
         return true;
     }
 
@@ -592,6 +600,17 @@ void WebViewMessageHandler::handleRequestOfficeRestart(CefRefPtr<Callback> callb
             cb->Failure(500, "restart request failed");
         }
     });
+}
+
+// The sidebar reports a signed-in transition so inline completion, paused on a
+// sign_in_required reply, resumes at once. One atomic increment and no document
+// or panel access, so it answers inline like getSessionToken. It sits behind the
+// same isTrustedUiUrl gate as every other type; the worst a caller can do with
+// it is make a paused controller retry one request.
+void WebViewMessageHandler::handleAuthStateChanged(CefRefPtr<Callback> callback)
+{
+    bumpAuthEpoch();
+    callback->Success("{\"success\":true}");
 }
 
 // The sidebar's mount-time theme must match what LibreOffice actually resolved

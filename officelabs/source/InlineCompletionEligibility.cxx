@@ -8,6 +8,7 @@
 #include <rtl/character.hxx>
 #include <rtl/strbuf.hxx>
 
+#include <atomic>
 #include <cctype>
 #include <cstdio>
 #include <sstream>
@@ -149,6 +150,35 @@ OUString parseFirstSuggestion(const std::string& rBody)
         return OUString();
     return OUString::fromUtf8(std::string_view(aText.data(), aText.size()));
 }
+
+bool isSignInRequiredResponse(long nStatus, const std::string& rBody)
+{
+    if (nStatus != 401)
+        return false;
+
+    boost::property_tree::ptree aTree;
+    try
+    {
+        std::istringstream aStream(rBody);
+        boost::property_tree::read_json(aStream, aTree);
+    }
+    catch (const std::exception&)
+    {
+        return false;
+    }
+
+    const auto aCode = aTree.get_optional<std::string>("detail.code");
+    return aCode && *aCode == "sign_in_required";
+}
+
+namespace
+{
+std::atomic<sal_uInt32> g_nAuthEpoch{ 0 };
+}
+
+sal_uInt32 authEpoch() { return g_nAuthEpoch.load(); }
+
+void bumpAuthEpoch() { ++g_nAuthEpoch; }
 
 } // namespace officelabs
 
