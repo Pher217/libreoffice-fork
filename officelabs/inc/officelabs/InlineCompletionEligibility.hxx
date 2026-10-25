@@ -13,6 +13,7 @@
 #include <officelabs/officelabsdllapi.h>
 #include <rtl/string.hxx>
 #include <rtl/ustring.hxx>
+#include <sal/types.h>
 
 #include <string>
 #include <string_view>
@@ -79,6 +80,17 @@ OFFICELABS_DLLPUBLIC OString buildCompletionRequest(const CursorContext& rContex
 /// empty string on malformed JSON, a missing/empty suggestions array, or a
 /// missing text field.
 OFFICELABS_DLLPUBLIC OUString parseFirstSuggestion(const std::string& rBody);
+
+/// True iff the agent answered the completion request with HTTP 401 and a body
+/// whose detail.code is "sign_in_required" (the signed-out reply). A plain 401,
+/// any other status, or a malformed body is false.
+OFFICELABS_DLLPUBLIC bool isSignInRequiredResponse(long nStatus, const std::string& rBody);
+
+/// Process-wide counter bumped whenever the sidebar reports that the signed-in
+/// state changed. A controller paused on sign_in_required records it and
+/// resumes once it differs.
+OFFICELABS_DLLPUBLIC sal_uInt32 authEpoch();
+OFFICELABS_DLLPUBLIC void bumpAuthEpoch();
 
 } // namespace officelabs
 
