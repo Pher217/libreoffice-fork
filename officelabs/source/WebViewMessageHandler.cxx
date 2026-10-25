@@ -17,6 +17,7 @@
 
 #include <officelabs/WebViewMessageHandler.hxx>
 #include <officelabs/TrustedUrl.hxx>
+#include <officelabs/ExternalUrlRateLimiter.hxx>
 #include <officelabs/WebViewPanel.hxx>
 #include <officelabs/DocumentController.hxx>
 #include <officelabs/AgentIdentity.hxx>
@@ -36,7 +37,9 @@
 #include <com/sun/star/system/XSystemShellExecute.hpp>
 #include <comphelper/processfactory.hxx>
 
+#include <chrono>
 #include <functional>
+#include <mutex>
 
 namespace {
 
@@ -628,6 +631,26 @@ void WebViewMessageHandler::handleOpenExternalUrl(const std::string& json,
         SAL_WARN("officelabs.cef", "openExternalUrl: refused a non-https or malformed URL");
         callback->Failure(400, "url must be a well-formed https:// URL");
         return;
+    }
+
+    // core#150: a handler exists per panel (one per document window) plus one
+    // per studio window, so the budget is process-wide, not per instance --
+    // otherwise N open sidebars would multiply it. Checked before the VCL
+    // dispatch so a rejected call never reaches the shell.
+    static std::mutex aLimiterMutex;
+    static ExternalUrlRateLimiter aLimiter;
+    {
+        const auto nNowMs = static_cast<sal_uInt64>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch())
+                .count());
+        std::lock_guard<std::mutex> aGuard(aLimiterMutex);
+        if (!aLimiter.tryAcquire(nNowMs))
+        {
+            SAL_WARN("officelabs.cef", "openExternalUrl: rate limit exceeded");
+            callback->Failure(429, "rate_limited");
+            return;
+        }
     }
 
     CefRefPtr<Callback> cb = callback;
