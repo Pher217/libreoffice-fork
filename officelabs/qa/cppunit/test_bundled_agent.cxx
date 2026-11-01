@@ -103,19 +103,19 @@ public:
     {
         auto e = buildEnv({});
         CPPUNIT_ASSERT(has(e, "LLM_COMPLETION_MODEL=officelabs-inline"));
-        CPPUNIT_ASSERT(has(e, "OFFICELABS_CHANNEL=development"));
+        CPPUNIT_ASSERT(has(e, "OFFICELABS_CHANNEL=production"));
         CPPUNIT_ASSERT(has(e, "SKIP_UNO=1"));
         CPPUNIT_ASSERT(has(e, "PATH=/usr/bin:/bin"));
     }
 
-    // GIVEN a config overriding the channel WHEN the env is built THEN the
-    // override replaces the default and is not duplicated.
+    // GIVEN a user config selecting the dev channel (staff switch, #351) WHEN the
+    // env is built THEN it replaces the production default and is not duplicated.
     void testEnvConfigOverrides()
     {
-        auto e = buildEnv({ { "OFFICELABS_CHANNEL", "production" },
+        auto e = buildEnv({ { "OFFICELABS_CHANNEL", "development" },
                             { "OFFICELABS_API_URL", "https://x" } });
-        CPPUNIT_ASSERT(has(e, "OFFICELABS_CHANNEL=production"));
-        CPPUNIT_ASSERT(!has(e, "OFFICELABS_CHANNEL=development"));
+        CPPUNIT_ASSERT(has(e, "OFFICELABS_CHANNEL=development"));
+        CPPUNIT_ASSERT(!has(e, "OFFICELABS_CHANNEL=production"));
         CPPUNIT_ASSERT(has(e, "OFFICELABS_API_URL=https://x"));
         CPPUNIT_ASSERT_EQUAL(1, int(std::count_if(e.begin(), e.end(), [](const std::string& s) {
                                  return s.rfind("OFFICELABS_CHANNEL=", 0) == 0;
