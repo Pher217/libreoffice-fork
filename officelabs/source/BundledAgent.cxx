@@ -91,7 +91,7 @@ std::vector<std::string> buildEnv(const std::map<std::string, std::string>& cfg)
 {
     std::map<std::string, std::string> env{
         { "LLM_COMPLETION_MODEL", "officelabs-inline" },
-        { "OFFICELABS_CHANNEL", "development" },
+        { "OFFICELABS_CHANNEL", "production" },
         { "SKIP_UNO", "1" },
     };
     for (const auto& [k, v] : cfg)
