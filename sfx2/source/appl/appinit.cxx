@@ -43,6 +43,7 @@
 #include <vcl/svapp.hxx>
 #include <vcl/settings.hxx>
 #include <svtools/miscopt.hxx>
+#include <officecfg/Office/Common.hxx>
 #include <cstring>
 
 #include <unoctitm.hxx>
@@ -198,8 +199,17 @@ void SfxApplication::Initialize_Impl()
             auto olc = sfx2::sidebar::GetOLColors();
             bool bDark = (sfx2::sidebar::GetOLTheme() != sfx2::sidebar::OLTheme::Light);
 
+            const OUString aIconTheme(bDark ? u"colibre_dark_svg"_ustr : u"colibre"_ustr);
+            // Persist first: on macOS the next system-settings merge clears the in-memory
+            // theme and re-reads Misc/SymbolStyle, which would still say "auto" (sukapura).
+            {
+                std::shared_ptr<comphelper::ConfigurationChanges> batch(
+                    comphelper::ConfigurationChanges::create());
+                officecfg::Office::Common::Misc::SymbolStyle::set(aIconTheme, batch);
+                batch->commit();
+            }
             SvtMiscOptions aMiscOpts;
-            aMiscOpts.SetIconTheme(bDark ? u"colibre_dark_svg"_ustr : u"colibre"_ustr);
+            aMiscOpts.SetIconTheme(aIconTheme);
 
             // Before the palette below: SetAppColorMode re-merges the system
             // colours, which would otherwise overwrite it.
