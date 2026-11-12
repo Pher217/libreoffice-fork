@@ -22,9 +22,12 @@
 #include <string>
 
 using officelabs::CursorContext;
+using officelabs::authEpoch;
 using officelabs::buildCompletionRequest;
+using officelabs::bumpAuthEpoch;
 using officelabs::isEligible;
 using officelabs::isInlineCompletionEnabledValue;
+using officelabs::isSignInRequiredResponse;
 using officelabs::parseFirstSuggestion;
 using officelabs::sanitizeSuggestion;
 using officelabs::stillValid;
@@ -232,6 +235,52 @@ public:
         CPPUNIT_ASSERT_EQUAL(OUString(), parseFirstSuggestion("not json"));
     }
 
+    // GIVEN the agent's signed-out 401 body WHEN checked THEN it is a
+    // sign-in-required response.
+    void testIsSignInRequiredResponse_signedOut401()
+    {
+        CPPUNIT_ASSERT(isSignInRequiredResponse(
+            401, R"({"detail":{"type":"error","code":"sign_in_required","message":"Sign in"}})"));
+    }
+
+    // GIVEN a 401 whose detail.code is something else WHEN checked THEN it is
+    // not a sign-in-required response.
+    void testIsSignInRequiredResponse_otherCode401()
+    {
+        CPPUNIT_ASSERT(!isSignInRequiredResponse(
+            401, R"({"detail":{"type":"error","code":"session_invalid"}})"));
+    }
+
+    // GIVEN a 401 whose detail is a plain string WHEN checked THEN it is not a
+    // sign-in-required response.
+    void testIsSignInRequiredResponse_stringDetail401()
+    {
+        CPPUNIT_ASSERT(!isSignInRequiredResponse(401, R"({"detail":"Unauthorized"})"));
+    }
+
+    // GIVEN a 401 with a body that is not JSON WHEN checked THEN it is not a
+    // sign-in-required response.
+    void testIsSignInRequiredResponse_malformed401()
+    {
+        CPPUNIT_ASSERT(!isSignInRequiredResponse(401, "not json"));
+    }
+
+    // GIVEN a sign_in_required body on a non-401 status WHEN checked THEN it is
+    // not a sign-in-required response.
+    void testIsSignInRequiredResponse_wrongStatus()
+    {
+        CPPUNIT_ASSERT(!isSignInRequiredResponse(
+            500, R"({"detail":{"type":"error","code":"sign_in_required"}})"));
+    }
+
+    // GIVEN the current auth epoch WHEN it is bumped THEN the epoch differs.
+    void testBumpAuthEpoch_changesEpoch()
+    {
+        const sal_uInt32 nBefore = authEpoch();
+        bumpAuthEpoch();
+        CPPUNIT_ASSERT(authEpoch() != nBefore);
+    }
+
     // GIVEN the toggle file is missing WHEN the value is interpreted THEN the
     // default is ON.
     void testIsInlineCompletionEnabledValue_missing()
@@ -295,6 +344,12 @@ public:
     CPPUNIT_TEST(testParseFirstSuggestion_returnsText);
     CPPUNIT_TEST(testParseFirstSuggestion_emptySuggestions);
     CPPUNIT_TEST(testParseFirstSuggestion_invalidJson);
+    CPPUNIT_TEST(testIsSignInRequiredResponse_signedOut401);
+    CPPUNIT_TEST(testIsSignInRequiredResponse_otherCode401);
+    CPPUNIT_TEST(testIsSignInRequiredResponse_stringDetail401);
+    CPPUNIT_TEST(testIsSignInRequiredResponse_malformed401);
+    CPPUNIT_TEST(testIsSignInRequiredResponse_wrongStatus);
+    CPPUNIT_TEST(testBumpAuthEpoch_changesEpoch);
     CPPUNIT_TEST(testIsInlineCompletionEnabledValue_missing);
     CPPUNIT_TEST(testIsInlineCompletionEnabledValue_off);
     CPPUNIT_TEST(testIsInlineCompletionEnabledValue_offTrimmedCase);

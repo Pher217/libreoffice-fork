@@ -55,6 +55,10 @@ const sal_Int32 COMPLETION_TIMEOUT_SECONDS = 3;
 // completion for the whole session (project#228).
 const sal_uInt64 INFLIGHT_WATCHDOG_MS = 10000;
 
+// Safety resume for a sign_in_required pause: sign-in completed outside the
+// sidebar (a browser, another machine's session) never reports authStateChanged.
+const sal_uInt64 SIGN_IN_PAUSE_MS = 5 * 60 * 1000;
+
 void runOnVclThread(void* pData, void*)
 {
     std::unique_ptr<std::function<void()>> pFn(static_cast<std::function<void()>*>(pData));
@@ -98,6 +102,11 @@ InlineCompletionController::InlineCompletionController(
     , m_bTypeThroughPending(false)
     , m_nFailures(0)
     , m_nBackoffUntilMs(0)
+    , m_bSignInPaused(false)
+    , m_nRequestEpoch(0)
+    , m_nPausedEpoch(0)
+    , m_nSignInPausedUntilMs(0)
+    , m_nSignInPauseMs(SIGN_IN_PAUSE_MS)
     , m_nInFlightTimeoutMs(INFLIGHT_WATCHDOG_MS)
     , m_nInFlightDeadlineMs(0)
     , m_nInFlightGeneration(0)
@@ -354,6 +363,18 @@ void InlineCompletionController::requestNow()
 
     const sal_uInt64 nNow = tools::Time::GetSystemTicks();
 
+    // Signed out (agent said sign_in_required): stay quiet until sign-in is
+    // reported or the safety interval passes, then try again.
+    if (m_bSignInPaused)
+    {
+        if (authEpoch() == m_nPausedEpoch && nNow < m_nSignInPausedUntilMs)
+        {
+            hideGhost();
+            return;
+        }
+        m_bSignInPaused = false;
+    }
+
     // Watchdog, before the in-flight guard below: a fetcher that never returns
     // would otherwise hold the slot forever and turn every later fire into the
     // early return -- inline completion silently dead for the rest of the
@@ -413,6 +434,7 @@ void InlineCompletionController::requestNow()
     const sal_uInt64 nGen = ++m_nGeneration;
     m_nInFlightGeneration = nGen;
     m_nInFlightDeadlineMs = nNow + m_nInFlightTimeoutMs;
+    m_nRequestEpoch = authEpoch();
     const OString sBody = buildCompletionRequest(c);
 
     std::thread([pShared = m_pShared, aFetcher = m_aFetcher, sBody, nGen]() {
@@ -468,6 +490,17 @@ void InlineCompletionController::onResult(sal_uInt64 nGeneration, const FetchRes
     // has since taken the slot (project#234). Discard it outright.
     if (!bOwnsSlot)
         return;
+
+    if (isSignInRequiredResponse(rResult.nStatus, rResult.aBody))
+    {
+        // The epoch the request was issued under, not the current one: a
+        // sign-in reported while this request was in flight must still resume.
+        m_bSignInPaused = true;
+        m_nPausedEpoch = m_nRequestEpoch;
+        m_nSignInPausedUntilMs = tools::Time::GetSystemTicks() + m_nSignInPauseMs;
+        hideGhost();
+        return;
+    }
 
     if (rResult.nStatus != 200)
     {

@@ -20,6 +20,8 @@
  *                      agent's saved-but-possibly-pending theme.txt.
  *   openExternalUrl - Open an https:// URL in the user's default system
  *                      browser (device-grant sign-in, core#117).
+ *   authStateChanged - The sidebar's signed-in state changed; resumes inline
+ *                      completion paused by a sign_in_required reply (core#169).
  *
  * THREADING: m_pPanel is std::atomic because it's read on the CEF IO
  *            thread (OnQuery) and written on the VCL thread (setPanel).
@@ -92,6 +94,7 @@ private:
     void handleRequestOfficeRestart(CefRefPtr<Callback> callback);
     void handleGetActiveTheme(CefRefPtr<Callback> callback);
     void handleOpenExternalUrl(const std::string& json, CefRefPtr<Callback> callback);
+    void handleAuthStateChanged(CefRefPtr<Callback> callback);
 
     std::atomic<WebViewPanel*> m_pPanel;
 };

@@ -101,6 +101,9 @@ public:
     /// Shorten the hung-fetcher watchdog so a test does not have to wait out
     /// the real deadline. Test-only; production never changes it.
     void setInFlightTimeoutMsForTest(sal_uInt64 nMs) { m_nInFlightTimeoutMs = nMs; }
+    /// Shorten the sign-in pause safety interval. Test-only.
+    void setSignInPauseMsForTest(sal_uInt64 nMs) { m_nSignInPauseMs = nMs; }
+    bool isSignInPaused() const { return m_bSignInPaused; }
     OUString ghostFontFamily() const { return m_pGhost ? m_pGhost->GetFont().GetFamilyName() : OUString(); }
     tools::Long ghostFontHeight() const { return m_pGhost ? m_pGhost->GetFont().GetFontHeight() : 0; }
     tools::Long ghostTextHeight() const { return m_pGhost ? m_pGhost->GetTextHeight() : 0; }
@@ -164,6 +167,18 @@ private:
 
     int m_nFailures;
     sal_uInt64 m_nBackoffUntilMs;
+
+    // Signed out: the agent answered 401 sign_in_required. No requests are
+    // issued while set, and this is deliberately not a failure -- backoff would
+    // only delay the retry that sign-in makes succeed. Cleared when authEpoch()
+    // differs from the epoch the paused request was issued under, or when the
+    // safety interval passes (sign-in done outside the sidebar never bumps it).
+    // VCL thread only.
+    bool m_bSignInPaused;
+    sal_uInt32 m_nRequestEpoch;
+    sal_uInt32 m_nPausedEpoch;
+    sal_uInt64 m_nSignInPausedUntilMs;
+    sal_uInt64 m_nSignInPauseMs;
 
     // Hung-fetcher watchdog. The fetch thread is detached and cannot be joined
     // or cancelled, so recovery is a deadline rather than a cancellation: if a

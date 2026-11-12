@@ -32,6 +32,7 @@
 #include <com/sun/star/text/XTextViewCursorSupplier.hpp>
 
 #include <officelabs/InlineCompletionController.hxx>
+#include <officelabs/InlineCompletionEligibility.hxx>
 #include <osl/thread.hxx>
 #include <com/sun/star/awt/XVclWindowPeer.hpp>
 
@@ -1451,6 +1452,178 @@ private:
         xController->dispose();
     }
 
+    /// Builds a started controller wired to a counting fetcher that always
+    /// answers with the given status and body. pCalls is a shared_ptr captured
+    /// by value for the same reason as in testHungFetcherDoesNotStrandInFlight.
+    rtl::Reference<officelabs::InlineCompletionController>
+    makeCountingController(const std::shared_ptr<std::atomic<int>>& pCalls, long nStatus,
+                           const std::string& rReplyBody)
+    {
+        officelabs::InlineCompletionController::Fetcher aFetcher =
+            [pCalls, nStatus, rReplyBody](const OString& /*rBody*/) {
+                ++*pCalls;
+                return officelabs::InlineCompletionController::FetchResult{ nStatus, rReplyBody };
+            };
+
+        Reference<frame::XModel> xModel(mxComponent, UNO_QUERY_THROW);
+        vcl::Window* pEditWin = getEditWindow();
+        rtl::Reference<officelabs::InlineCompletionController> xController(
+            new officelabs::InlineCompletionController(
+                xModel->getCurrentController(), xModel, pEditWin, aFetcher,
+                makeCaretProvider(pEditWin), makeEnabledProvider()));
+        xController->start();
+        return xController;
+    }
+
+    static std::string signInRequiredBody()
+    {
+        return R"({"detail":{"type":"error","code":"sign_in_required","message":"Sign in"}})";
+    }
+
+    // GIVEN the agent answers 401 sign_in_required WHEN the next trigger fires
+    // THEN no further request is issued and the controller reports paused.
+    void testSignInRequiredPausesRequests()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        auto pCalls = std::make_shared<std::atomic<int>>(0);
+        auto xController = makeCountingController(pCalls, 401, signInRequiredBody());
+
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+        CPPUNIT_ASSERT_EQUAL(1, pCalls->load());
+        CPPUNIT_ASSERT(xController->isSignInPaused());
+
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+        CPPUNIT_ASSERT_EQUAL(1, pCalls->load());
+
+        xController->dispose();
+    }
+
+    // GIVEN four consecutive sign_in_required replies, each followed by a
+    // sign-in epoch bump WHEN the controller is triggered after each bump THEN
+    // every trigger issues a request: the pause is not counted as a failure, so
+    // the three-strikes 30 s backoff never engages.
+    void testSignInRequiredIsNotCountedAsFailure()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        auto pCalls = std::make_shared<std::atomic<int>>(0);
+        auto xController = makeCountingController(pCalls, 401, signInRequiredBody());
+
+        for (int i = 0; i < 4; ++i)
+        {
+            xController->requestNow();
+            drainUntilIdle(xController.get());
+            officelabs::bumpAuthEpoch();
+        }
+
+        CPPUNIT_ASSERT_EQUAL(4, pCalls->load());
+
+        xController->dispose();
+    }
+
+    // GIVEN a plain 401 without the sign_in_required code WHEN four triggers
+    // fire THEN the normal failure backoff applies after three requests and the
+    // controller is not in the sign-in paused state.
+    void testPlain401UsesFailureBackoff()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        auto pCalls = std::make_shared<std::atomic<int>>(0);
+        auto xController = makeCountingController(pCalls, 401, R"({"detail":"Unauthorized"})");
+
+        for (int i = 0; i < 4; ++i)
+        {
+            xController->requestNow();
+            drainUntilIdle(xController.get());
+        }
+
+        CPPUNIT_ASSERT_EQUAL(3, pCalls->load());
+        CPPUNIT_ASSERT(!xController->isSignInPaused());
+
+        xController->dispose();
+    }
+
+    // GIVEN a 500 reply WHEN four triggers fire THEN the normal failure backoff
+    // applies after three requests and the controller is not in the sign-in
+    // paused state.
+    void testServerErrorUsesFailureBackoff()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        auto pCalls = std::make_shared<std::atomic<int>>(0);
+        auto xController = makeCountingController(pCalls, 500, "error");
+
+        for (int i = 0; i < 4; ++i)
+        {
+            xController->requestNow();
+            drainUntilIdle(xController.get());
+        }
+
+        CPPUNIT_ASSERT_EQUAL(3, pCalls->load());
+        CPPUNIT_ASSERT(!xController->isSignInPaused());
+
+        xController->dispose();
+    }
+
+    // GIVEN the controller is paused on sign_in_required WHEN the auth epoch is
+    // bumped THEN the next trigger issues a request again.
+    void testAuthEpochBumpResumesRequests()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        auto pCalls = std::make_shared<std::atomic<int>>(0);
+        auto xController = makeCountingController(pCalls, 401, signInRequiredBody());
+
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+        CPPUNIT_ASSERT(xController->isSignInPaused());
+
+        officelabs::bumpAuthEpoch();
+
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+        CPPUNIT_ASSERT_EQUAL(2, pCalls->load());
+
+        xController->dispose();
+    }
+
+    // GIVEN the controller is paused on sign_in_required and the safety
+    // interval is zero WHEN the next trigger fires with no epoch bump THEN a
+    // request is issued again (sign-in done outside the sidebar recovers).
+    void testSignInPauseSafetyIntervalResumes()
+    {
+        loadFromURL(u"private:factory/swriter"_ustr);
+        Reference<text::XTextDocument> xTextDoc(mxComponent, UNO_QUERY_THROW);
+        setTextAndGotoEnd(xTextDoc);
+
+        auto pCalls = std::make_shared<std::atomic<int>>(0);
+        auto xController = makeCountingController(pCalls, 401, signInRequiredBody());
+        xController->setSignInPauseMsForTest(0);
+
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+        CPPUNIT_ASSERT_EQUAL(1, pCalls->load());
+
+        xController->requestNow();
+        drainUntilIdle(xController.get());
+        CPPUNIT_ASSERT_EQUAL(2, pCalls->load());
+
+        xController->dispose();
+    }
+
     CPPUNIT_TEST_SUITE(InlineCompletionControllerTest);
     CPPUNIT_TEST(testAcceptSuggestion);
     CPPUNIT_TEST(testTabAcceptsSuggestion);
@@ -1485,6 +1658,12 @@ private:
     CPPUNIT_TEST(testAbandonedReplyDoesNotReleaseNewerRequest);
     CPPUNIT_TEST(testAbandonedReplySuccessDoesNotMaskFailures);
     CPPUNIT_TEST(testRepeatedAbandonmentStillTripsBackoff);
+    CPPUNIT_TEST(testSignInRequiredPausesRequests);
+    CPPUNIT_TEST(testSignInRequiredIsNotCountedAsFailure);
+    CPPUNIT_TEST(testPlain401UsesFailureBackoff);
+    CPPUNIT_TEST(testServerErrorUsesFailureBackoff);
+    CPPUNIT_TEST(testAuthEpochBumpResumesRequests);
+    CPPUNIT_TEST(testSignInPauseSafetyIntervalResumes);
     CPPUNIT_TEST_SUITE_END();
 };
 
