@@ -11,10 +11,12 @@
 #include <cppunit/TestFixture.h>
 #include <cppunit/extensions/HelperMacros.h>
 
+#include <officelabs/ExternalUrlRateLimiter.hxx>
 #include <officelabs/WebViewMessageHandler.hxx>
 #include <rtl/ustrbuf.hxx>
 
 using officelabs::buildActiveThemeJson;
+using officelabs::ExternalUrlRateLimiter;
 using officelabs::isOpenableExternalUrl;
 
 namespace
@@ -148,6 +150,103 @@ public:
         CPPUNIT_ASSERT(!isOpenableExternalUrl(sUrl));
     }
 
+    // GIVEN an uppercase scheme WHEN checked THEN it is rejected -- the
+    // validator's startsWith("https://") is case-sensitive, and the TS
+    // mirror is too. (Real URL schemes are case-insensitive; refusing is the
+    // safe direction and the sidebar only sends lowercase.)
+    void testOpenableUrlRejectsUppercaseScheme()
+    {
+        CPPUNIT_ASSERT(!isOpenableExternalUrl(u"HTTPS://example.com/"_ustr));
+    }
+
+    // GIVEN a URL with a leading space WHEN checked THEN it is rejected.
+    void testOpenableUrlRejectsLeadingSpace()
+    {
+        CPPUNIT_ASSERT(!isOpenableExternalUrl(u" https://example.com/"_ustr));
+    }
+
+    // GIVEN a URL with a trailing space WHEN checked THEN it is rejected.
+    void testOpenableUrlRejectsTrailingSpace()
+    {
+        CPPUNIT_ASSERT(!isOpenableExternalUrl(u"https://example.com/ "_ustr));
+    }
+
+    // GIVEN a URL with an embedded tab WHEN checked THEN it is rejected.
+    void testOpenableUrlRejectsEmbeddedTab()
+    {
+        CPPUNIT_ASSERT(!isOpenableExternalUrl(u"https://example.com/\tpath"_ustr));
+    }
+
+    // GIVEN "https:" without the "//" WHEN checked THEN it is rejected.
+    void testOpenableUrlRejectsSchemeWithoutSlashes()
+    {
+        CPPUNIT_ASSERT(!isOpenableExternalUrl(u"https:example.com"_ustr));
+    }
+
+    // GIVEN "https:" followed by backslashes WHEN checked THEN it is rejected.
+    void testOpenableUrlRejectsBackslashAuthority()
+    {
+        CPPUNIT_ASSERT(!isOpenableExternalUrl(u"https:\\\\example.com"_ustr));
+    }
+
+    // GIVEN a URL with an embedded NUL WHEN checked THEN it is rejected.
+    void testOpenableUrlRejectsEmbeddedNul()
+    {
+        OUStringBuffer aBuf(u"https://example.com/a"_ustr);
+        aBuf.append(sal_Unicode(0));
+        aBuf.append(u"b"_ustr);
+        const OUString sUrl = aBuf.makeStringAndClear();
+        CPPUNIT_ASSERT_EQUAL(sal_Int32(23), sUrl.getLength());
+        CPPUNIT_ASSERT(!isOpenableExternalUrl(sUrl));
+    }
+
+    // GIVEN a limiter of 3 per 10 s WHEN 3 opens arrive inside the window
+    // THEN all 3 are allowed.
+    void testRateLimiterAllowsUpToMax()
+    {
+        ExternalUrlRateLimiter aLimiter(3, 10000);
+        CPPUNIT_ASSERT(aLimiter.tryAcquire(0));
+        CPPUNIT_ASSERT(aLimiter.tryAcquire(1000));
+        CPPUNIT_ASSERT(aLimiter.tryAcquire(2000));
+    }
+
+    // GIVEN 3 opens already inside the window WHEN a 4th arrives THEN it is
+    // rejected.
+    void testRateLimiterRejectsOverMax()
+    {
+        ExternalUrlRateLimiter aLimiter(3, 10000);
+        aLimiter.tryAcquire(0);
+        aLimiter.tryAcquire(1000);
+        aLimiter.tryAcquire(2000);
+        CPPUNIT_ASSERT(!aLimiter.tryAcquire(3000));
+    }
+
+    // GIVEN the limit was hit WHEN the oldest open leaves the window THEN
+    // one open is allowed again, and the next is rejected.
+    void testRateLimiterAllowsAgainAfterWindow()
+    {
+        ExternalUrlRateLimiter aLimiter(3, 10000);
+        aLimiter.tryAcquire(0);
+        aLimiter.tryAcquire(1000);
+        aLimiter.tryAcquire(2000);
+        CPPUNIT_ASSERT(!aLimiter.tryAcquire(9999));
+        CPPUNIT_ASSERT(aLimiter.tryAcquire(10000));
+        CPPUNIT_ASSERT(!aLimiter.tryAcquire(10001));
+    }
+
+    // GIVEN rejected attempts WHEN the original window elapses THEN they did
+    // not extend the lockout -- rejections are not recorded.
+    void testRateLimiterRejectionsDoNotExtendLockout()
+    {
+        ExternalUrlRateLimiter aLimiter(3, 10000);
+        aLimiter.tryAcquire(0);
+        aLimiter.tryAcquire(0);
+        aLimiter.tryAcquire(0);
+        for (sal_uInt64 t = 1000; t < 10000; t += 1000)
+            aLimiter.tryAcquire(t);
+        CPPUNIT_ASSERT(aLimiter.tryAcquire(10000));
+    }
+
     CPPUNIT_TEST_SUITE(WebViewMessageHandlerTest);
     CPPUNIT_TEST(testPlainThemeName);
     CPPUNIT_TEST(testEscapesDoubleQuote);
@@ -166,6 +265,17 @@ public:
     CPPUNIT_TEST(testOpenableUrlRejectsEmpty);
     CPPUNIT_TEST(testOpenableUrlAcceptsAtLengthCap);
     CPPUNIT_TEST(testOpenableUrlRejectsOverLengthCap);
+    CPPUNIT_TEST(testOpenableUrlRejectsUppercaseScheme);
+    CPPUNIT_TEST(testOpenableUrlRejectsLeadingSpace);
+    CPPUNIT_TEST(testOpenableUrlRejectsTrailingSpace);
+    CPPUNIT_TEST(testOpenableUrlRejectsEmbeddedTab);
+    CPPUNIT_TEST(testOpenableUrlRejectsSchemeWithoutSlashes);
+    CPPUNIT_TEST(testOpenableUrlRejectsBackslashAuthority);
+    CPPUNIT_TEST(testOpenableUrlRejectsEmbeddedNul);
+    CPPUNIT_TEST(testRateLimiterAllowsUpToMax);
+    CPPUNIT_TEST(testRateLimiterRejectsOverMax);
+    CPPUNIT_TEST(testRateLimiterAllowsAgainAfterWindow);
+    CPPUNIT_TEST(testRateLimiterRejectionsDoNotExtendLockout);
     CPPUNIT_TEST_SUITE_END();
 };
 
