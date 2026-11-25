@@ -581,10 +581,11 @@ WebViewPanel::~WebViewPanel()
         if (state.host)
             state.host->setPanel(nullptr);
 
-        // The last document closed: no panel is left to hide the host, and it
-        // would stay over the Start Center (project#399). OLE in-place
-        // activation keeps the document shell, so it is unaffected.
-        if (state.host && !SfxObjectShell::Current())
+        // This frame's document closed: no panel is left to hide the host, and
+        // it would stay over the Start Center (project#399). Uses this panel's
+        // own frame state, so another window's document does not keep it up.
+        // OLE in-place activation keeps the document shell, so it is unaffected.
+        if (state.host && !hasOpenDocument())
             state.host->hide();
     }
 
@@ -810,18 +811,21 @@ void WebViewPanel::reattachCefBrowser()
 
 bool WebViewPanel::hasOpenDocument() const
 {
+    bool bFrameResolved = false;
+    bool bFrameHasShell = false;
     if (m_pBindings)
     {
         if (SfxDispatcher* pDisp = m_pBindings->GetDispatcher())
         {
             if (SfxViewFrame* pViewFrame = pDisp->GetFrame())
             {
-                if (pViewFrame->GetObjectShell())
-                    return true;
+                bFrameResolved = true;
+                bFrameHasShell = pViewFrame->GetObjectShell() != nullptr;
             }
         }
     }
-    return SfxObjectShell::Current() != nullptr;
+    return documentOpenForFrame(bFrameResolved, bFrameHasShell,
+                                SfxObjectShell::Current() != nullptr);
 }
 
 void WebViewPanel::syncCefWindowSize()

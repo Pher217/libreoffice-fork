@@ -12,6 +12,17 @@
 
 namespace officelabs {
 
+/// Whether a document is open for THIS panel's frame. When the panel's own view
+/// frame resolves, only that frame's object shell counts: the globally current
+/// shell belongs to the focused window, so with two windows it would report
+/// window B's document for window A's Start Center. The current shell is only
+/// a fallback for a frame that cannot be resolved at all.
+inline constexpr bool documentOpenForFrame(bool bFrameResolved, bool bFrameHasShell,
+                                           bool bCurrentShellExists)
+{
+    return bFrameResolved ? bFrameHasShell : bCurrentShellExists;
+}
+
 enum class HostAction
 {
     None,

@@ -15,6 +15,7 @@
 #include <officelabs/PanelHostVisibility.hxx>
 
 using officelabs::HostAction;
+using officelabs::documentOpenForFrame;
 using officelabs::hostActionForDocumentState;
 
 namespace
@@ -51,11 +52,44 @@ public:
         CPPUNIT_ASSERT(HostAction::None == hostActionForDocumentState(true, false));
     }
 
+    // GIVEN two windows, this frame back on the Start Center (resolved, no
+    // shell) while the other window's document is the current shell
+    // WHEN document state is derived THEN no document is open for this frame.
+    void testOtherWindowsDocumentDoesNotCount()
+    {
+        CPPUNIT_ASSERT_EQUAL(false, documentOpenForFrame(true, false, true));
+    }
+
+    // GIVEN this frame resolves and has a shell WHEN document state is derived
+    // THEN a document is open, whatever the current shell is.
+    void testOwnFrameShellCounts()
+    {
+        CPPUNIT_ASSERT_EQUAL(true, documentOpenForFrame(true, true, false));
+    }
+
+    // GIVEN the frame cannot be resolved and a current shell exists WHEN
+    // document state is derived THEN the current shell is the fallback.
+    void testUnresolvedFrameFallsBackToCurrentShell()
+    {
+        CPPUNIT_ASSERT_EQUAL(true, documentOpenForFrame(false, false, true));
+    }
+
+    // GIVEN the frame cannot be resolved and no current shell exists WHEN
+    // document state is derived THEN no document is open.
+    void testUnresolvedFrameWithoutCurrentShell()
+    {
+        CPPUNIT_ASSERT_EQUAL(false, documentOpenForFrame(false, false, false));
+    }
+
     CPPUNIT_TEST_SUITE(PanelHostVisibilityTest);
     CPPUNIT_TEST(testNoDocumentHidesShownHost);
     CPPUNIT_TEST(testNoDocumentKeepsHostHidden);
     CPPUNIT_TEST(testDocumentAppearsShowsHiddenHost);
     CPPUNIT_TEST(testDocumentOpenLeavesHostAlone);
+    CPPUNIT_TEST(testOtherWindowsDocumentDoesNotCount);
+    CPPUNIT_TEST(testOwnFrameShellCounts);
+    CPPUNIT_TEST(testUnresolvedFrameFallsBackToCurrentShell);
+    CPPUNIT_TEST(testUnresolvedFrameWithoutCurrentShell);
     CPPUNIT_TEST_SUITE_END();
 };
 
