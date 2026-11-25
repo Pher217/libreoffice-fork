@@ -31,6 +31,10 @@
 #include <vcl/svapp.hxx>
 #include <vcl/threadex.hxx>
 
+#ifdef HAVE_FEATURE_CEF
+#include <officelabs/StartCenterAccountWidget.hxx>
+#endif
+
 #include <utility>
 
 namespace officelabs {
@@ -95,6 +99,17 @@ OfficeLabsJob::execute(const css::uno::Sequence<css::beans::NamedValue>& rArgume
 
     if (sOperation == "undo_agent_top")
         return executeUndoAgentTop(rArguments);
+
+#ifdef HAVE_FEATURE_CEF
+    // BackingWindow (sfx2) cannot link this module and the Start Center opens
+    // before any document has loaded it, so it asks here for the account
+    // entry factory (project#418).
+    if (sOperation == "register_start_center_account")
+    {
+        registerStartCenterAccount();
+        return css::uno::Any(u"ok"_ustr);
+    }
+#endif
 
     throw css::lang::IllegalArgumentException(
         "OfficeLabsJob: unknown Operation \"" + sOperation + "\"",

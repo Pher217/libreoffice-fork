@@ -6,6 +6,7 @@
 $(eval $(call gb_UIConfig_UIConfig,officelabs))
 
 $(eval $(call gb_UIConfig_add_uifiles,officelabs,\
+    officelabs/ui/startcenteraccount \
     officelabs/ui/webviewpanel \
 ))
 

@@ -627,6 +627,44 @@ void WebViewMessageHandler::handleGetActiveTheme(CefRefPtr<Callback> callback)
     callback->Success(buildActiveThemeJson(sTheme));
 }
 
+namespace {
+
+// core#150: a handler exists per panel (one per document window) plus one per
+// studio window, and the Start Center sign-in entry opens URLs too, so the
+// budget is process-wide, not per caller -- otherwise N open sidebars would
+// multiply it.
+bool acquireExternalUrlOpenSlot()
+{
+    static std::mutex aLimiterMutex;
+    static ExternalUrlRateLimiter aLimiter;
+    const auto nNowMs = static_cast<sal_uInt64>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+    std::lock_guard<std::mutex> aGuard(aLimiterMutex);
+    return aLimiter.tryAcquire(nNowMs);
+}
+
+// Hands an already validated URL to the OS. Must run on the VCL thread.
+bool shellOpenExternalUrl(const OUString& rUrl)
+{
+    try
+    {
+        css::uno::Reference<css::system::XSystemShellExecute> xSystemShellExecute(
+            css::system::SystemShellExecute::create(comphelper::getProcessComponentContext()));
+        xSystemShellExecute->execute(rUrl, OUString(),
+                                     css::system::SystemShellExecuteFlags::URIS_ONLY);
+        return true;
+    }
+    catch (const css::uno::Exception&)
+    {
+        SAL_WARN("officelabs.cef", "openExternalUrl: SystemShellExecute failed");
+        return false;
+    }
+}
+
+} // anonymous namespace
+
 // core#117 / core#112. The device authorization grant needs the user to
 // approve a code on the verification page in a REAL browser -- CEF's own
 // window is not acceptable, since it is exactly the surface the sidebar
@@ -652,43 +690,37 @@ void WebViewMessageHandler::handleOpenExternalUrl(const std::string& json,
         return;
     }
 
-    // core#150: a handler exists per panel (one per document window) plus one
-    // per studio window, so the budget is process-wide, not per instance --
-    // otherwise N open sidebars would multiply it. Checked before the VCL
-    // dispatch so a rejected call never reaches the shell.
-    static std::mutex aLimiterMutex;
-    static ExternalUrlRateLimiter aLimiter;
+    // Checked before the VCL dispatch so a rejected call never reaches the shell.
+    if (!acquireExternalUrlOpenSlot())
     {
-        const auto nNowMs = static_cast<sal_uInt64>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch())
-                .count());
-        std::lock_guard<std::mutex> aGuard(aLimiterMutex);
-        if (!aLimiter.tryAcquire(nNowMs))
-        {
-            SAL_WARN("officelabs.cef", "openExternalUrl: rate limit exceeded");
-            callback->Failure(429, "rate_limited");
-            return;
-        }
+        SAL_WARN("officelabs.cef", "openExternalUrl: rate limit exceeded");
+        callback->Failure(429, "rate_limited");
+        return;
     }
 
     CefRefPtr<Callback> cb = callback;
 
     postToVclThread([sUrl, cb]() {
-        try
-        {
-            css::uno::Reference<css::system::XSystemShellExecute> xSystemShellExecute(
-                css::system::SystemShellExecute::create(comphelper::getProcessComponentContext()));
-            xSystemShellExecute->execute(sUrl, OUString(),
-                                         css::system::SystemShellExecuteFlags::URIS_ONLY);
+        if (shellOpenExternalUrl(sUrl))
             cb->Success("{\"success\":true}");
-        }
-        catch (const css::uno::Exception&)
-        {
-            SAL_WARN("officelabs.cef", "openExternalUrl: SystemShellExecute failed");
+        else
             cb->Failure(500, "failed to open URL");
-        }
     });
+}
+
+ExternalUrlOpen openExternalUrlValidated(const OUString& rUrl)
+{
+    if (!isOpenableExternalUrl(rUrl))
+    {
+        SAL_WARN("officelabs.cef", "openExternalUrl: refused a non-https or malformed URL");
+        return ExternalUrlOpen::Refused;
+    }
+    if (!acquireExternalUrlOpenSlot())
+    {
+        SAL_WARN("officelabs.cef", "openExternalUrl: rate limit exceeded");
+        return ExternalUrlOpen::RateLimited;
+    }
+    return shellOpenExternalUrl(rUrl) ? ExternalUrlOpen::Opened : ExternalUrlOpen::Failed;
 }
 
 } // namespace officelabs

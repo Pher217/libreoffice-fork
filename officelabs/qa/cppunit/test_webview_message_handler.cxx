@@ -67,6 +67,17 @@ public:
             isOpenableExternalUrl(u"https://officelabs.lindest.eu/device?user_code=ABCD-1234"_ustr));
     }
 
+    // GIVEN the device-confirm link the backend returns on dev and on prod
+    // WHEN checked THEN both are openable (the Start Center sign-in entry opens
+    // whatever verification_uri_complete the agent returns, project#418).
+    void testOpenableUrlAcceptsDevAndProdConfirmLinks()
+    {
+        CPPUNIT_ASSERT(isOpenableExternalUrl(
+            u"https://dev.officelabs.tech/device/confirm?user_code=ABCD-EFGH"_ustr));
+        CPPUNIT_ASSERT(isOpenableExternalUrl(
+            u"https://officelabs.tech/device/confirm?user_code=ABCD-EFGH"_ustr));
+    }
+
     // GIVEN a plain http URL WHEN checked THEN it is rejected -- only https
     // is trusted to open externally.
     void testOpenableUrlRejectsHttp()
@@ -254,6 +265,7 @@ public:
     CPPUNIT_TEST(testEmptyThemeName);
     CPPUNIT_TEST(testOpenableUrlAcceptsHttps);
     CPPUNIT_TEST(testOpenableUrlAcceptsQueryString);
+    CPPUNIT_TEST(testOpenableUrlAcceptsDevAndProdConfirmLinks);
     CPPUNIT_TEST(testOpenableUrlRejectsHttp);
     CPPUNIT_TEST(testOpenableUrlRejectsFileScheme);
     CPPUNIT_TEST(testOpenableUrlRejectsJavascriptScheme);

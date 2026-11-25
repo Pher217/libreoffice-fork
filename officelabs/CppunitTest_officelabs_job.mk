@@ -40,6 +40,11 @@ $(eval $(call gb_CppunitTest_use_externals,officelabs_job,\
 
 $(eval $(call gb_CppunitTest_use_sdk_api,officelabs_job))
 
+# The start-center registration operation exists only in a CEF build (project#418).
+ifeq ($(ENABLE_CEF),TRUE)
+$(eval $(call gb_CppunitTest_add_defs,officelabs_job,-DHAVE_FEATURE_CEF))
+endif
+
 $(eval $(call gb_CppunitTest_use_ure,officelabs_job))
 $(eval $(call gb_CppunitTest_use_vcl,officelabs_job))
 

@@ -116,6 +116,7 @@ $(eval $(call gb_Library_add_exception_objects,officelabs,\
     officelabs/source/OfficelabsBrowserApp \
     officelabs/source/GhostTextWindow \
     officelabs/source/InlineCompletionController \
+    officelabs/source/StartCenterAccountWidget \
 ))
 
 # macOS-only Objective-C++ message-pump shim (dispatch to the AppKit main thread).

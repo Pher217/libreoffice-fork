@@ -104,7 +104,7 @@ public:
         const StartCenterAccountView aView = mapAuthStatus(
             200, R"({"state":"signed_in","email":"a@b.ch","plan_tier":"pro"})");
         CPPUNIT_ASSERT_EQUAL(std::string("a@b.ch"), aView.aLabel);
-        CPPUNIT_ASSERT_EQUAL(std::string("Plan: pro"), aView.aSublabel);
+        CPPUNIT_ASSERT_EQUAL(std::string("Plan: Pro"), aView.aSublabel);
     }
 
     // GIVEN a signed-in account WHEN mapped THEN the button signs out.
@@ -114,6 +114,15 @@ public:
             200, R"({"state":"signed_in","email":"a@b.ch","plan_tier":"pro"})");
         CPPUNIT_ASSERT(aView.eAction == StartCenterAccountAction::SignOut);
         CPPUNIT_ASSERT_EQUAL(std::string("Sign out"), aView.aButton);
+    }
+
+    // GIVEN the agent reports the plan as an upper-case enum ("FREE") WHEN mapped
+    // THEN the sublabel shows it in display case ("Free").
+    void testPlanIsShownInDisplayCase()
+    {
+        const StartCenterAccountView aView = mapAuthStatus(
+            200, R"({"state":"signed_in","email":"a@b.ch","plan_tier":"FREE"})");
+        CPPUNIT_ASSERT_EQUAL(std::string("Plan: Free"), aView.aSublabel);
     }
 
     // GIVEN a signed-in account without plan_tier WHEN mapped
@@ -255,6 +264,7 @@ public:
     CPPUNIT_TEST(testSignedInState);
     CPPUNIT_TEST(testSignedInShowsEmailAndPlan);
     CPPUNIT_TEST(testSignedInActionIsSignOut);
+    CPPUNIT_TEST(testPlanIsShownInDisplayCase);
     CPPUNIT_TEST(testSignedInWithoutPlanHasEmptySublabel);
     CPPUNIT_TEST(testSignedInWithoutEmailFallsBack);
     CPPUNIT_TEST(testOfflineKeepsTheAccountVisible);
