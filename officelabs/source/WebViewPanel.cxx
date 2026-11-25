@@ -51,6 +51,7 @@
 #include <officelabs/WebViewMessageHandler.hxx>
 #include <officelabs/DocumentController.hxx>
 #include <officelabs/InlineCompletionController.hxx>
+#include <officelabs/PanelHostVisibility.hxx>
 #include <officelabs/StudioWindow.hxx>
 
 #include <sfx2/bindings.hxx>
@@ -579,12 +580,21 @@ WebViewPanel::~WebViewPanel()
             static_cast<WebViewCefClient*>(state.client.get())->setPanel(nullptr);
         if (state.host)
             state.host->setPanel(nullptr);
+
+        // The last document closed: no panel is left to hide the host, and it
+        // would stay over the Start Center (project#399). Deliberately NOT
+        // hasOpenDocument(): during frame teardown m_pBindings' dispatcher and
+        // view frame may already be gone. The multi-window case is covered by
+        // the Start Center panel's own syncCefWindowSize(), which judges per
+        // frame. OLE in-place activation keeps the document shell.
+        if (state.host && !SfxObjectShell::Current())
+            state.host->hide();
     }
 
-    // Keep the native host WHERE IT IS during the destroy/recreate transition.
-    // DO NOT hide it or move it off-screen — both cause it to not re-show
-    // because syncCefWindowSize() fights with the visibility state before
-    // the VCL parent is fully laid out.
+    // Otherwise keep the native host WHERE IT IS during the destroy/recreate
+    // transition. DO NOT hide it or move it off-screen — both cause it to not
+    // re-show because syncCefWindowSize() fights with the visibility state
+    // before the VCL parent is fully laid out.
 
     if (m_xInlineCompletion)
     {
@@ -801,10 +811,46 @@ void WebViewPanel::reattachCefBrowser()
     SAL_INFO("officelabs.cef", "reattachCefBrowser: done");
 }
 
+bool WebViewPanel::hasOpenDocument() const
+{
+    bool bFrameResolved = false;
+    bool bFrameHasShell = false;
+    if (m_pBindings)
+    {
+        if (SfxDispatcher* pDisp = m_pBindings->GetDispatcher())
+        {
+            if (SfxViewFrame* pViewFrame = pDisp->GetFrame())
+            {
+                bFrameResolved = true;
+                bFrameHasShell = pViewFrame->GetObjectShell() != nullptr;
+            }
+        }
+    }
+    return documentOpenForFrame(bFrameResolved, bFrameHasShell,
+                                SfxObjectShell::Current() != nullptr);
+}
+
 void WebViewPanel::syncCefWindowSize()
 {
     if (!m_pNativeHost || !m_pBinWindow)
         return;
+
+    // The Start Center has no document: keep the host off screen there
+    // (project#399). Checked before the reattach grace period, which would
+    // otherwise leave a just-shown host visible.
+    switch (hostActionForDocumentState(hasOpenDocument(), m_bHostHiddenNoDocument))
+    {
+        case HostAction::Hide:
+            m_pNativeHost->hide();
+            m_bHostHiddenNoDocument = true;
+            return;
+        case HostAction::Show:
+            m_pNativeHost->show();
+            m_bHostHiddenNoDocument = false;
+            break;
+        case HostAction::None:
+            break;
+    }
 
     // Walk up the VCL hierarchy to find the largest enclosing sidebar panel.
     // m_pBinWindow->GetParent() is the panel content area, but it may be
