@@ -62,6 +62,7 @@ $(eval $(call gb_Library_add_exception_objects,officelabs,\
     officelabs/source/DocumentController \
     officelabs/source/InlineCompletionEligibility \
     officelabs/source/OfficeLabsJob \
+    officelabs/source/StartCenterAccount \
 ))
 
 # === CEF WebView support (conditional on --with-cef) ===

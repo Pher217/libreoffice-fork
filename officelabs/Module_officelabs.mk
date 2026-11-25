@@ -12,6 +12,7 @@ $(eval $(call gb_Module_add_check_targets,officelabs,\
 	CppunitTest_officelabs_cursor \
 	CppunitTest_officelabs_job \
 	CppunitTest_officelabs_panelui \
+	CppunitTest_officelabs_startcenter \
 ))
 
 # CEF WebView support (conditional on --with-cef)
