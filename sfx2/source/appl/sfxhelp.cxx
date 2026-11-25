@@ -634,7 +634,9 @@ static bool impl_showOfficeLabsDocs(weld::Widget* pDialogParent)
         return false;
 
     const OUString aDocsUrl = OUString::fromUtf8(sfx2::officelabs::ResolveDocsUrl(
-        std::getenv("OFFICELABS_DOCS_URL"), std::getenv("OFFICELABS_CHANNEL")));
+        std::getenv("OFFICELABS_DOCS_URL"), std::getenv("OFFICELABS_CHANNEL"),
+        std::getenv("OFFICELABS_DOCS_URL_PRODUCTION"),
+        std::getenv("OFFICELABS_DOCS_URL_DEVELOPMENT")));
     try
     {
 #ifdef MACOSX

@@ -230,9 +230,14 @@ void doStart()
     if (!home.empty())
         parseConfig(readFile(home + "/Library/Application Support/OfficeLabs/officelabs.config"),
                     cfg);
-    // F1 (sfx2 impl_showOfficeLabsDocs) reads the channel from this process's environment.
-    if (const auto it = cfg.find("OFFICELABS_CHANNEL"); it != cfg.end())
-        ::setenv("OFFICELABS_CHANNEL", it->second.c_str(), 0);
+    // F1 (sfx2 impl_showOfficeLabsDocs) reads the channel and both docs hosts from this
+    // process's environment (officelabs-project#419).
+    for (const char* key : { "OFFICELABS_CHANNEL", "OFFICELABS_DOCS_URL_PRODUCTION",
+                             "OFFICELABS_DOCS_URL_DEVELOPMENT" })
+    {
+        if (const auto it = cfg.find(key); it != cfg.end())
+            ::setenv(key, it->second.c_str(), 0);
+    }
 
     const bool bInUse = isPortInUse();
     const PortDecision eDecision = decide(bInUse, bInUse && isHealthyOfficeLabsAgent());
