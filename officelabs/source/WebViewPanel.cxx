@@ -581,11 +581,13 @@ WebViewPanel::~WebViewPanel()
         if (state.host)
             state.host->setPanel(nullptr);
 
-        // This frame's document closed: no panel is left to hide the host, and
-        // it would stay over the Start Center (project#399). Uses this panel's
-        // own frame state, so another window's document does not keep it up.
-        // OLE in-place activation keeps the document shell, so it is unaffected.
-        if (state.host && !hasOpenDocument())
+        // The last document closed: no panel is left to hide the host, and it
+        // would stay over the Start Center (project#399). Deliberately NOT
+        // hasOpenDocument(): during frame teardown m_pBindings' dispatcher and
+        // view frame may already be gone. The multi-window case is covered by
+        // the Start Center panel's own syncCefWindowSize(), which judges per
+        // frame. OLE in-place activation keeps the document shell.
+        if (state.host && !SfxObjectShell::Current())
             state.host->hide();
     }
 
