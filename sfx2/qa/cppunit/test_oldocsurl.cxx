@@ -38,6 +38,21 @@ public:
                              ResolveDocsUrl(nullptr, "dev"));
     }
 
+    // GIVEN the development channel (the value officelabs.config carries) WHEN resolved
+    // THEN it is docs.dev.officelabs.tech.
+    void testDevelopmentChannel()
+    {
+        CPPUNIT_ASSERT_EQUAL(std::string("https://docs.dev.officelabs.tech"),
+                             ResolveDocsUrl(nullptr, "development"));
+    }
+
+    // GIVEN the production channel WHEN resolved THEN it is docs.officelabs.tech.
+    void testProductionChannel()
+    {
+        CPPUNIT_ASSERT_EQUAL(std::string("https://docs.officelabs.tech"),
+                             ResolveDocsUrl(nullptr, "production"));
+    }
+
     // GIVEN an unknown channel WHEN resolved THEN it falls back to prod.
     void testUnknownChannelIsProd()
     {
@@ -62,6 +77,8 @@ public:
     CPPUNIT_TEST_SUITE(OLDocsUrlTest);
     CPPUNIT_TEST(testDefaultsToProd);
     CPPUNIT_TEST(testDevChannel);
+    CPPUNIT_TEST(testDevelopmentChannel);
+    CPPUNIT_TEST(testProductionChannel);
     CPPUNIT_TEST(testUnknownChannelIsProd);
     CPPUNIT_TEST(testOverrideWins);
     CPPUNIT_TEST(testEmptyOverrideIgnored);
