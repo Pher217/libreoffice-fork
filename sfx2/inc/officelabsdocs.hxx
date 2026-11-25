@@ -5,14 +5,14 @@
 
 namespace sfx2::officelabs {
 
-/// OFFICELABS_DOCS_URL (full override) > channel "dev" > production.
+/// OFFICELABS_DOCS_URL (full override) > channel "development" ("dev" accepted) > production.
 /// Hosts follow officelabs-master CLAUDE.md: docs.dev.officelabs.tech for dev,
 /// docs.officelabs.tech for prod (the dash form dev-docs is stale).
 inline std::string ResolveDocsUrl(const char* pOverride, const char* pChannel)
 {
     if (pOverride && *pOverride)
         return pOverride;
-    if (pChannel && std::string(pChannel) == "dev")
+    if (pChannel && (std::string(pChannel) == "development" || std::string(pChannel) == "dev"))
         return "https://docs.dev.officelabs.tech";
     return "https://docs.officelabs.tech";
 }

@@ -230,6 +230,9 @@ void doStart()
     if (!home.empty())
         parseConfig(readFile(home + "/Library/Application Support/OfficeLabs/officelabs.config"),
                     cfg);
+    // F1 (sfx2 impl_showOfficeLabsDocs) reads the channel from this process's environment.
+    if (const auto it = cfg.find("OFFICELABS_CHANNEL"); it != cfg.end())
+        ::setenv("OFFICELABS_CHANNEL", it->second.c_str(), 0);
 
     const bool bInUse = isPortInUse();
     const PortDecision eDecision = decide(bInUse, bInUse && isHealthyOfficeLabsAgent());
