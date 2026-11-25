@@ -19,6 +19,7 @@ $(eval $(call gb_CppunitTest_add_exception_objects,officelabs_inline, \
 	officelabs/qa/cppunit/test_cef_cache_path \
 	officelabs/qa/cppunit/test_cef_debug_port \
 	officelabs/qa/cppunit/test_bundled_agent \
+	officelabs/qa/cppunit/test_panel_host_visibility \
 ))
 
 $(eval $(call gb_CppunitTest_use_externals,officelabs_inline,boost_headers))

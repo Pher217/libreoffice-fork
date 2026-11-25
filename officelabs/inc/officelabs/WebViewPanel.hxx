@@ -130,6 +130,10 @@ private:
 
     DECL_LINK(ResizeTimerHdl, Timer*, void);
 
+    // True when a document shell is reachable from this panel's bindings (or
+    // is the current one). False on the Start Center.
+    bool hasOpenDocument() const;
+
     SfxBindings* m_pBindings;
 
     // VclBin created via CreateChildFrame() inside the weld container
@@ -158,6 +162,11 @@ private:
     // where the VCL parent isn't laid out yet and IsReallyVisible()
     // returns false, causing an immediate hide.
     int m_nReattachGraceTicks = 0;
+
+    // True while syncCefWindowSize() has the host hidden because no document
+    // is open (the Start Center, project#399). Lets it re-show the host once
+    // a document appears.
+    bool m_bHostHiddenNoDocument = false;
 
     // Backend document bridge (per-panel — rebuilt on each attach)
     std::unique_ptr<DocumentController> m_pDocController;
