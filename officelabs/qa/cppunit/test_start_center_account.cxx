@@ -11,6 +11,7 @@
 #include <cppunit/TestAssert.h>
 #include <cppunit/TestFixture.h>
 #include <cppunit/extensions/HelperMacros.h>
+#include <cppunit/plugin/TestPlugIn.h>
 
 #include <officelabs/StartCenterAccount.hxx>
 
@@ -274,5 +275,7 @@ public:
 
 CPPUNIT_TEST_SUITE_REGISTRATION(StartCenterAccountTest);
 }
+
+CPPUNIT_PLUGIN_IMPLEMENT();
 
 /* vim:set shiftwidth=4 softtabstop=4 expandtab: */
