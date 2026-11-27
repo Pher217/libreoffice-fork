@@ -26,6 +26,7 @@
 #include <vcl/weld/ComboBox.hxx>
 #include <vcl/weld/MenuButton.hxx>
 
+#include <sfx2/startcenteraccount.hxx>
 #include <recentdocsview.hxx>
 #include <templatedefaultview.hxx>
 
@@ -75,6 +76,8 @@ class BackingWindow : public InterimItemWindow
     std::unique_ptr<weld::Container> mxAllButtonsBox;
     std::unique_ptr<weld::Container> mxButtonsBox;
     std::unique_ptr<weld::Container> mxSmallButtonsBox;
+    std::unique_ptr<weld::Container> mxAccountContainer;
+    std::unique_ptr<sfx2::StartCenterAccountEntry> mxAccount;
 
     std::unique_ptr<sfx2::RecentDocsView> mxAllRecentThumbnails;
     std::unique_ptr<weld::CustomWeld> mxAllRecentThumbnailsWin;
@@ -108,6 +111,8 @@ class BackingWindow : public InterimItemWindow
     void initializeLocalView();
 
     void checkInstalledModules();
+
+    void initAccountEntry();
 
     void DataChanged(const DataChangedEvent&) override;
 

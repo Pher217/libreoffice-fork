@@ -353,6 +353,19 @@
                       </packing>
                     </child>
                     <child>
+                      <!-- OfficeLabs: filled by a factory the officelabs module registers; empty in stock LibreOffice -->
+                      <object class="GtkBox" id="account_container">
+                        <property name="visible">True</property>
+                        <property name="can-focus">False</property>
+                        <property name="orientation">vertical</property>
+                      </object>
+                      <packing>
+                        <property name="expand">False</property>
+                        <property name="fill">True</property>
+                        <property name="position">13</property>
+                      </packing>
+                    </child>
+                    <child>
                       <object class="GtkLabel" id="althelplabel">
                         <property name="can-focus">False</property>
                         <property name="no-show-all">True</property>

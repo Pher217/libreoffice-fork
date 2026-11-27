@@ -46,6 +46,7 @@
 #include <i18nlangtag/languagetag.hxx>
 #include <comphelper/diagnose_ex.hxx>
 
+#include <com/sun/star/beans/NamedValue.hpp>
 #include <com/sun/star/configuration/theDefaultProvider.hpp>
 #include <com/sun/star/container/XNameAccess.hpp>
 #include <com/sun/star/datatransfer/dnd/XDropTarget.hpp>
@@ -55,9 +56,11 @@
 #include <com/sun/star/lang/XMultiServiceFactory.hpp>
 #include <com/sun/star/system/SystemShellExecute.hpp>
 #include <com/sun/star/system/SystemShellExecuteFlags.hpp>
+#include <com/sun/star/task/XJob.hpp>
 #include <com/sun/star/util/URLTransformer.hpp>
 #include <com/sun/star/task/InteractionHandler.hpp>
 
+#include <sfx2/startcenteraccount.hxx>
 #include <sfx2/strings.hrc>
 #include <sfx2/sfxresid.hxx>
 #include <bitmaps.hlst>
@@ -162,6 +165,7 @@ BackingWindow::BackingWindow(vcl::Window* i_pParent)
     , mxAllButtonsBox(m_xBuilder->weld_container(u"all_buttons_box"_ustr))
     , mxButtonsBox(m_xBuilder->weld_container(u"buttons_box"_ustr))
     , mxSmallButtonsBox(m_xBuilder->weld_container(u"small_buttons_box"_ustr))
+    , mxAccountContainer(m_xBuilder->weld_container(u"account_container"_ustr))
     , mxAllRecentThumbnails(new sfx2::RecentDocsView(m_xBuilder->weld_scrolled_window(u"scrollrecent"_ustr, true)))
     , mxAllRecentThumbnailsWin(new weld::CustomWeld(*m_xBuilder, u"all_recent"_ustr, *mxAllRecentThumbnails))
     , mxLocalView(new TemplateDefaultView(m_xBuilder->weld_scrolled_window(u"scrolllocal"_ustr, true),
@@ -204,6 +208,57 @@ BackingWindow::BackingWindow(vcl::Window* i_pParent)
     Reference<XDesktop2> xDesktop = Desktop::create( comphelper::getProcessComponentContext() );
     mxDesktopDispatchProvider = xDesktop;
 
+    initAccountEntry();
+}
+
+namespace sfx2
+{
+namespace
+{
+StartCenterAccountFactory g_pStartCenterAccountFactory = nullptr;
+}
+
+void SetStartCenterAccountFactory(StartCenterAccountFactory pFactory)
+{
+    g_pStartCenterAccountFactory = pFactory;
+}
+
+StartCenterAccountFactory GetStartCenterAccountFactory() { return g_pStartCenterAccountFactory; }
+}
+
+// OfficeLabs: the officelabs module lives in a library sfx2 cannot link, and it is not
+// loaded yet when the Start Center opens, so ask its job component to register the
+// account entry factory. Without the module (stock LibreOffice) the service is absent
+// and the container stays empty.
+void BackingWindow::initAccountEntry()
+{
+    if (!mxContext.is())
+        return;
+
+    try
+    {
+        Reference<task::XJob> xJob(
+            mxContext->getServiceManager()->createInstanceWithContext(
+                u"ai.officelabs.OfficeLabsJob"_ustr, mxContext),
+            UNO_QUERY);
+        if (xJob.is())
+            xJob->execute({ NamedValue(u"Operation"_ustr,
+                                       Any(u"register_start_center_account"_ustr)) });
+    }
+    catch (const Exception&)
+    {
+        TOOLS_WARN_EXCEPTION("sfx.dialog", "BackingWindow: OfficeLabs account entry unavailable");
+    }
+
+    if (sfx2::StartCenterAccountFactory pFactory = sfx2::GetStartCenterAccountFactory())
+    {
+        mxAccount = pFactory(*mxAccountContainer);
+        // The brand image is as tall as the column is wide. With the entry the
+        // column no longer fits a laptop screen, and it squeezes the entry's
+        // button to nothing; the welcome pane already carries the brand.
+        if (mxAccount)
+            mxBrandImage->GetDrawingArea()->hide();
+    }
 }
 
 IMPL_LINK(BackingWindow, ClickHelpHdl, weld::Button&, rButton, void)
@@ -252,6 +307,8 @@ void BackingWindow::dispose()
     mxAllButtonsBox.reset();
     mxButtonsBox.reset();
     mxSmallButtonsBox.reset();
+    mxAccount.reset();
+    mxAccountContainer.reset();
     mxAllRecentThumbnailsWin.reset();
     mxAllRecentThumbnails.reset();
     mxLocalViewWin.reset();
@@ -393,7 +450,8 @@ void BackingWindow::ApplyStyleSettings()
     // Refetch because the brand image height to match this width is now set
     aPrefSize = mxAllButtonsBox->get_preferred_size();
 
-    set_height_request(nMenuHeight + aPrefSize.Height() + mxBrandImage->getSize().getHeight());
+    const sal_Int32 nBrandHeight = pDrawingArea->get_visible() ? mxBrandImage->getSize().getHeight() : 0;
+    set_height_request(nMenuHeight + aPrefSize.Height() + nBrandHeight);
 }
 
 void BackingWindow::initializeLocalView()
@@ -499,6 +557,9 @@ bool BackingWindow::PreNotify(NotifyEvent& rNEvt)
 
 void BackingWindow::GetFocus()
 {
+    if (mxAccount)
+        mxAccount->refresh();
+
     GetFocusFlags nFlags = GetParent()->GetGetFocusFlags();
     if( nFlags & GetFocusFlags::F6 )
     {

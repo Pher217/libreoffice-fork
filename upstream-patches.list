@@ -85,6 +85,7 @@ desktop/util/officeloader.rc
 instsetoo_native/CustomTarget_install.mk
 instsetoo_native/util/openoffice.lst.in
 sfx2/source/dialog/backingwindow.cxx
+sfx2/source/dialog/backingwindow.hxx
 sfx2/uiconfig/ui/startcenter.ui
 framework/source/helper/titlebarupdate.cxx
 shell/source/win32/jumplist/JumpList.cxx

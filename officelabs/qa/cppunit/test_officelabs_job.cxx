@@ -27,6 +27,7 @@
 #include <com/sun/star/uno/XInterface.hpp>
 
 #include <cppuhelper/implbase.hxx>
+#include <sfx2/startcenteraccount.hxx>
 #include <osl/thread.hxx>
 #include <vcl/svapp.hxx>
 
@@ -443,7 +444,28 @@ private:
         CPPUNIT_ASSERT_EQUAL(nSolarThread, pAction->getRecordedThread());
     }
 
+#ifdef HAVE_FEATURE_CEF
+    // GIVEN no Start Center account factory is registered WHEN the job runs
+    // register_start_center_account THEN sfx2 holds a factory for BackingWindow
+    // to fill its account container with (project#418).
+    void testRegistersTheStartCenterAccountFactory()
+    {
+        sfx2::SetStartCenterAccountFactory(nullptr);
+        Reference<task::XJob> xJob = createJob();
+        Sequence<beans::NamedValue> aArgs{
+            { u"Operation"_ustr, Any(u"register_start_center_account"_ustr) },
+        };
+
+        xJob->execute(aArgs);
+
+        CPPUNIT_ASSERT(sfx2::GetStartCenterAccountFactory() != nullptr);
+    }
+#endif
+
     CPPUNIT_TEST_SUITE(OfficeLabsJobTest);
+#ifdef HAVE_FEATURE_CEF
+    CPPUNIT_TEST(testRegistersTheStartCenterAccountFactory);
+#endif
     CPPUNIT_TEST(testUndoesTwoMatchingEntries);
     CPPUNIT_TEST(testRefusesNonMatchingTopEntry);
     CPPUNIT_TEST(testMaxStepsCapsCount);

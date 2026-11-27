@@ -60,6 +60,19 @@ OFFICELABS_DLLPUBLIC std::string buildActiveThemeJson(const std::string& themeNa
 /// only gate before the URL is opened, so reject rather than best-effort.
 OFFICELABS_DLLPUBLIC bool isOpenableExternalUrl(const OUString& rUrl);
 
+enum class ExternalUrlOpen
+{
+    Opened,
+    Refused,
+    RateLimited,
+    Failed
+};
+
+/// The sidebar's openExternalUrl path for callers already on the VCL thread
+/// (the Start Center sign-in entry): isOpenableExternalUrl, then the
+/// process-wide rate limit (core#150), then the OS URL opener.
+OFFICELABS_DLLPUBLIC ExternalUrlOpen openExternalUrlValidated(const OUString& rUrl);
+
 class WebViewPanel;
 
 class WebViewMessageHandler final : public CefMessageRouterBrowserSide::Handler
